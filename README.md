@@ -1,4 +1,4 @@
-Bài tập lớn cấp tốc: Hệ thống quản lý nhà kính
+Bài tập lớn cấp tốc: Hệ thống quản lý nhà kính trồng hoa
 
 Hiện chỉ có giao diện UI, chưa liên kết với SQL server hay MQTT
 
