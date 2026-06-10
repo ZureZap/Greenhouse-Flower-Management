@@ -50,23 +50,11 @@ export function openDeviceApproval(id) {
   document.getElementById('dev-type').value = dev.type;
   document.getElementById('dev-zone').value = dev.zone || 'Khu A - Giàn 1';
   document.getElementById('dev-mac').value = dev.macAddress;
+  // Đảm bảo không ở chế độ thêm mới khi phê duyệt
+  window._addingNew = false;
   openModal('device-modal');
 }
 
-export function approveDevice() {
-  const id = state.pendingDeviceId;
-  const dev = state.devices.find(d => d.id === id);
-  if (!dev) return;
-  dev.name = document.getElementById('dev-name').value;
-  dev.type = document.getElementById('dev-type').value;
-  dev.zone = document.getElementById('dev-zone').value;
-  dev.status = 'ACTIVE';
-  closeModal('device-modal');
-  renderDevices();
-  showToast('Thiết bị đã được phê duyệt và kích hoạt');
-}
-
-// Hiển thị modal thêm thiết bị mới (không phải phê duyệt)
 export function showAddDeviceModal() {
   // Reset form
   document.getElementById('dev-name').value = '';
@@ -75,13 +63,12 @@ export function showAddDeviceModal() {
   // Tạo MAC giả
   const fakeMac = 'AA:BB:CC:' + Math.floor(Math.random()*0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
   document.getElementById('dev-mac').value = fakeMac;
-  // Lưu ý: cần phân biệt chế độ "thêm mới" và "phê duyệt"
-  // Có thể dùng một biến toàn cục tạm: window._addingNew = true
+  // Đánh dấu đây là chế độ thêm mới
   window._addingNew = true;
   openModal('device-modal');
 }
 
-// Sửa hàm approveDevice để xử lý cả thêm mới và phê duyệt
+// HÀM DUY NHẤT: xử lý cả thêm mới và phê duyệt
 export function approveDevice() {
   const name = document.getElementById('dev-name').value;
   const type = document.getElementById('dev-type').value;
@@ -89,7 +76,7 @@ export function approveDevice() {
   const mac = document.getElementById('dev-mac').value;
   
   if (window._addingNew) {
-    // Thêm thiết bị mới (trạng thái ACTIVE luôn, hoặc PENDING tùy logic)
+    // Thêm thiết bị mới
     const newDevice = {
       id: Date.now().toString(),
       name,
@@ -104,7 +91,7 @@ export function approveDevice() {
     showToast('Đã thêm thiết bị mới');
     window._addingNew = false;
   } else {
-    // Phê duyệt thiết bị đang chờ (code cũ)
+    // Phê duyệt thiết bị đang chờ
     const id = state.pendingDeviceId;
     const dev = state.devices.find(d => d.id === id);
     if (dev) {
