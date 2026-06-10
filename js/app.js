@@ -1,79 +1,104 @@
+/**
+ * app.js
+ * Ứng dụng chính - điều phối các trang, xử lý điều hướng, modal và thông báo.
+ * Mỗi trang được quản lý bởi một module riêng (dashboard, devices, zones, growth, control, alerts, logs).
+ */
+
 import { state } from './state.js';
-import { initDashboardCharts } from './dashboard.js';
-import { renderDevices, approveDevice, openDeviceApproval } from './devices.js';
-import { renderZones, selectZone, toggleZoneExpand } from './zones.js';
-import { renderGrowth, applyGrowthAdjust, openGrowthAdjust } from './growth.js';
-import { renderControls, toggleControlMode, toggleDevice, setControlValue, resetToAuto } from './control.js';
-import { renderAlerts, acknowledgeAlert, resolveAlert, dismissAlert } from './alerts.js';
-import { renderLogs } from './logs.js';
+import { renderDashboardPage } from './dashboard.js';
+import { renderDevicesPage } from './devices.js';
+import { renderZonesPage } from './zones.js';
+import { renderGrowthPage } from './growth.js';
+import { renderControlPage } from './control.js';
+import { renderAlertsPage } from './alerts.js';
+import { renderLogsPage } from './logs.js';
 
-// Common utilities
+// ===================== CÁC TIỆN ÍCH CHUNG =====================
+
+/**
+ * Hiển thị thông báo dạng toast
+ * @param {string} msg - Nội dung thông báo
+ * @param {string} type - Loại: 'success', 'warning', 'info', 'error'
+ */
 export function showToast(msg, type = 'success') {
-  const c = document.getElementById('toast-container');
-  const t = document.createElement('div');
-  t.className = `toast toast-${type}`;
-  t.textContent = msg;
-  c.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
 }
 
+/**
+ * Mở modal theo ID
+ * @param {string} id - ID của phần tử modal (phải có class 'modal-overlay')
+ */
 export function openModal(id) {
-  document.getElementById(id).classList.add('open');
+    const modal = document.getElementById(id);
+    if (modal) modal.classList.add('open');
 }
 
+/**
+ * Đóng modal theo ID
+ * @param {string} id - ID của phần tử modal
+ */
 export function closeModal(id) {
-  document.getElementById(id).classList.remove('open');
+    const modal = document.getElementById(id);
+    if (modal) modal.classList.remove('open');
 }
 
-// Navigation
-document.querySelectorAll('.nav-item').forEach(el => {
-  el.addEventListener('click', e => {
-    e.preventDefault();
-    const p = el.dataset.page;
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    el.classList.add('active');
-    document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
-    document.getElementById('page-' + p).classList.add('active');
-    if (p === 'devices') renderDevices();
-    if (p === 'zones') renderZones();
-    if (p === 'growth') renderGrowth();
-    if (p === 'control') renderControls();
-    if (p === 'alerts') renderAlerts();
-    if (p === 'logs') renderLogs();
-  });
+// ===================== ĐIỀU HƯỚNG CÁC TRANG =====================
+
+// Xử lý sự kiện click trên thanh menu
+document.querySelectorAll('.nav-item').forEach(menuItem => {
+    menuItem.addEventListener('click', event => {
+        event.preventDefault();
+        const pageName = menuItem.dataset.page;   // 'dashboard', 'devices', ...
+
+        // Cập nhật trạng thái active cho menu
+        document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+        menuItem.classList.add('active');
+
+        // Ẩn tất cả các trang, hiển thị trang được chọn
+        document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+        document.getElementById(`page-${pageName}`).classList.add('active');
+
+        // Gọi hàm render tương ứng cho từng trang
+        switch (pageName) {
+            case 'dashboard': renderDashboardPage(); break;
+            case 'devices':   renderDevicesPage();   break;
+            case 'zones':     renderZonesPage();     break;
+            case 'growth':    renderGrowthPage();    break;
+            case 'control':   renderControlPage();   break;
+            case 'alerts':    renderAlertsPage();    break;
+            case 'logs':      renderLogsPage();      break;
+            default: break;
+        }
+    });
 });
 
-// Modal overlay close
-document.querySelectorAll('.modal-overlay').forEach(el => {
-  el.addEventListener('click', e => {
-    if (e.target === el) el.classList.remove('open');
-  });
+// Khi tải trang lần đầu, xác định trang đang active (mặc định là dashboard)
+const activePage = document.querySelector('.page.active')?.id?.replace('page-', '') || 'dashboard';
+switch (activePage) {
+    case 'dashboard': renderDashboardPage(); break;
+    case 'devices':   renderDevicesPage();   break;
+    case 'zones':     renderZonesPage();     break;
+    case 'growth':    renderGrowthPage();    break;
+    case 'control':   renderControlPage();   break;
+    case 'alerts':    renderAlertsPage();    break;
+    case 'logs':      renderLogsPage();      break;
+    default: renderDashboardPage();
+}
+
+// ===================== XỬ LÝ MODAL =====================
+
+// Đóng modal khi click ra ngoài vùng nội dung (event delegation)
+document.body.addEventListener('click', (event) => {
+    if (event.target.classList && event.target.classList.contains('modal-overlay')) {
+        event.target.classList.remove('open');
+    }
 });
 
-// Initial render
-initDashboardCharts();
-renderDevices();
-renderZones();
-renderGrowth();
-renderControls();
-renderAlerts();
-renderLogs();
-
-// Expose all global functions needed by inline event handlers
+// Expose các hàm tiện ích ra window để có thể gọi từ inline onclick
 window.closeModal = closeModal;
 window.openModal = openModal;
-window.approveDevice = approveDevice;
-window.openDeviceApproval = openDeviceApproval;
-window.applyGrowthAdjust = applyGrowthAdjust;
-window.openGrowthAdjust = openGrowthAdjust;
-window.renderZones = renderZones;
-window.selectZone = selectZone;
-window.toggleZoneExpand = toggleZoneExpand;
-window.toggleControlMode = toggleControlMode;
-window.toggleDevice = toggleDevice;
-window.setControlValue = setControlValue;
-window.resetToAuto = resetToAuto;
-window.acknowledgeAlert = acknowledgeAlert;
-window.resolveAlert = resolveAlert;
-window.dismissAlert = dismissAlert;
-window.renderLogs = renderLogs;

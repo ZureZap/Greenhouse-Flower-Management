@@ -4,358 +4,65 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quản lý Nhà kính Trồng hoa</title>
+    <!-- Thư viện Chart.js để vẽ biểu đồ -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Các file CSS cho bố cục, thành phần và trang -->
     <link rel="stylesheet" href="css/layout.css">
     <link rel="stylesheet" href="css/components.css">
     <link rel="stylesheet" href="css/pages.css">
 </head>
 <body>
+    <!-- Thanh điều hướng bên trái (sidebar) -->
     <nav id="sidebar">
         <div class="sidebar-header">
-            <div class="sidebar-logo">&#127807;</div>
+            <div class="sidebar-logo">🌿</div>
             <div>
                 <div class="sidebar-title">Nhà kính</div>
                 <div class="sidebar-sub">Quản lý trồng hoa</div>
             </div>
         </div>
         <div class="sidebar-nav">
-            <a class="nav-item active" data-page="dashboard" href="#"><span class="nav-icon">&#128202;</span> Dashboard</a>
-            <a class="nav-item" data-page="devices" href="#"><span class="nav-icon">&#128225;</span> Thiết bị IoT</a>
-            <a class="nav-item" data-page="zones" href="#"><span class="nav-icon">&#128193;</span> Quản lý vùng</a>
-            <a class="nav-item" data-page="growth" href="#"><span class="nav-icon">&#127807;</span> Chu kỳ sinh trưởng</a>
-            <a class="nav-item" data-page="control" href="#"><span class="nav-icon">&#127905;</span> Điều khiển</a>
-            <a class="nav-item" data-page="alerts" href="#"><span class="nav-icon">&#128276;</span> Cảnh báo</a>
-            <a class="nav-item" data-page="logs" href="#"><span class="nav-icon">&#128203;</span> Nhật ký hệ thống</a>
+            <!-- Các mục menu, data-page chỉ định trang tương ứng -->
+            <a class="nav-item active" data-page="dashboard" href="#">
+                <span class="nav-icon">📊</span> Dashboard
+            </a>
+            <a class="nav-item" data-page="devices" href="#">
+                <span class="nav-icon">🔧</span> Thiết bị IoT
+            </a>
+            <a class="nav-item" data-page="zones" href="#">
+                <span class="nav-icon">🗃️</span> Quản lý vùng
+            </a>
+            <a class="nav-item" data-page="growth" href="#">
+                <span class="nav-icon">🌿</span> Chu kỳ sinh trưởng
+            </a>
+            <a class="nav-item" data-page="control" href="#">
+                <span class="nav-icon">🎛️</span> Điều khiển
+            </a>
+            <a class="nav-item" data-page="alerts" href="#">
+                <span class="nav-icon">🚨</span> Cảnh báo
+            </a>
+            <a class="nav-item" data-page="logs" href="#">
+                <span class="nav-icon">📋</span> Nhật ký hệ thống
+            </a>
         </div>
     </nav>
 
+    <!-- Khu vực nội dung chính -->
     <main id="main">
-        <!-- DASHBOARD -->
-        <div class="page active" id="page-dashboard">
-            <div class="page-header">
-                <div>
-                    <div class="page-title">Dashboard Tổng quan</div>
-                    <div class="page-sub">Giám sát thời gian thực các chỉ số môi trường nhà kính</div>
-                </div>
-            </div>
-            <div class="grid grid-4" style="margin-bottom:20px">
-                <div class="card">
-                    <div class="stat-icon" style="background:#fef3c7;color:#f59e0b">&#127777;&#65039;</div>
-                    <div class="stat-label">Nhiệt độ TB</div>
-                    <div class="stat-value">24.5°C</div>
-                    <span class="chip chip-default" style="margin-top:6px">Bình thường</span>
-                </div>
-                <div class="card">
-                    <div class="stat-icon" style="background:#dbeafe;color:#3b82f6">&#128167;</div>
-                    <div class="stat-label">Độ ẩm TB</div>
-                    <div class="stat-value">72%</div>
-                    <span class="chip chip-default" style="margin-top:6px">Bình thường</span>
-                </div>
-                <div class="card">
-                    <div class="stat-icon" style="background:#fef3c7;color:#f59e0b">&#9728;&#65039;</div>
-                    <div class="stat-label">Cường độ sáng</div>
-                    <div class="stat-value">550 lux</div>
-                    <span class="chip chip-warning" style="margin-top:6px">Cao</span>
-                </div>
-                <div class="card">
-                    <div class="stat-icon" style="background:#d1fae5;color:#10b981">&#127783;&#65039;</div>
-                    <div class="stat-label">CO2</div>
-                    <div class="stat-value">485 ppm</div>
-                    <span class="chip chip-success" style="margin-top:6px">Tối ưu</span>
-                </div>
-            </div>
-            <div class="grid grid-8-4" style="margin-bottom:20px">
-                <div class="card">
-                    <div class="card-title">Biến động 24 giờ qua</div>
-                    <div class="chart-container" style="height:300px">
-                        <canvas id="areaChart"></canvas>
-                    </div>
-                </div>
-                <div class="card">
-                    <div class="card-title">Cân bằng môi trường</div>
-                    <div class="chart-container" style="height:300px">
-                        <canvas id="radarChart"></canvas>
-                    </div>
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-title">Xu hướng ánh sáng & CO2</div>
-                <div class="chart-container" style="height:250px">
-                    <canvas id="lineChart"></canvas>
-                </div>
-            </div>
-        </div>
-
-        <!-- DEVICES -->
-        <div class="page" id="page-devices">
-            <div class="page-header">
-                <div>
-                    <div class="page-title">Quản lý Thiết bị IoT</div>
-                    <div class="page-sub">Theo dõi vòng đời và sức khỏe thiết bị cảm biến</div>
-                </div>
-                <button class="btn btn-primary" onclick="window.showAddDeviceModal()">➕ Thêm thiết bị</button>
-            </div>
-            <div class="grid grid-4" id="device-stats" style="margin-bottom:20px"></div>
-            <div class="card">
-                <div class="card-title">Danh sách thiết bị</div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Tên thiết bị</th>
-                                <th>Loại</th>
-                                <th>MAC Address</th>
-                                <th>Khu vực</th>
-                                <th>Trạng thái</th>
-                                <th>Pin</th>
-                                <th>Heartbeat cuối</th>
-                                <th>Thao tác</th>
-                            </tr>
-                        </thead>
-                        <tbody id="device-table"></tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="modal-overlay" id="device-modal">
-                <div class="modal">
-                    <div class="modal-title">Phê duyệt thiết bị mới</div>
-                    <div class="form-group">
-                        <label class="form-label">Tên thiết bị</label>
-                        <input class="form-input" id="dev-name" type="text">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Loại thiết bị</label>
-                        <select class="form-select" id="dev-type">
-                            <option value="Temperature">Nhiệt độ</option>
-                            <option value="Humidity">Độ ẩm</option>
-                            <option value="Light">Ánh sáng</option>
-                            <option value="CO2">CO2</option>
-                            <option value="Actuator">Điều khiển</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Gán vào khu vực</label>
-                        <select class="form-select" id="dev-zone">
-                            <option value="Khu A - Giàn 1">Khu A - Giàn 1</option>
-                            <option value="Khu A - Giàn 2">Khu A - Giàn 2</option>
-                            <option value="Khu B - Giàn 1">Khu B - Giàn 1</option>
-                            <option value="Khu B - Giàn 2">Khu B - Giàn 2</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">MAC Address</label>
-                        <input class="form-input" id="dev-mac" type="text" disabled>
-                    </div>
-                    <div class="modal-actions">
-                        <button class="btn btn-outline" onclick="closeModal('device-modal')">Hủy</button>
-                        <button class="btn btn-primary" onclick="approveDevice()">Phê duyệt & Kích hoạt</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ZONES -->
-        <div class="page" id="page-zones">
-            <div class="page-header">
-                <div>
-                    <div class="page-title">Quản lý Vùng trồng</div>
-                    <div class="page-sub">Phân vùng quản lý và trực quan hóa cấu trúc nhà kính</div>
-                </div>
-                <button class="btn btn-primary">➕ Thêm khu vực</button>
-            </div>
-            <div class="grid grid-5-7">
-                <div class="card">
-                    <div class="card-title">Cấu trúc phân cấp</div>
-                    <div id="zone-tree"></div>
-                </div>
-                <div class="card" id="zone-detail">
-                    <div style="display:flex;align-items:center;justify-content:center;min-height:400px;text-align:center;color:#9ca3af">
-                        <div>
-                            <div style="font-size:2rem;margin-bottom:8px">&#128193;</div>
-                            <div style="font-size:1rem;font-weight:500;margin-bottom:4px">Chọn một khu vực</div>
-                            <div style="font-size:0.85rem">Chọn một khu vực từ cây phân cấp để xem chi tiết</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- GROWTH -->
-        <div class="page" id="page-growth">
-            <div class="page-header">
-                <div>
-                    <div class="page-title">Chu kỳ Sinh trưởng</div>
-                    <div class="page-sub">Theo dõi và điều chỉnh công thức sinh trưởng</div>
-                </div>
-                <button class="btn btn-primary">➕ Tạo công thức mới</button>
-            </div>
-            <div id="growth-list"></div>
-            <div class="modal-overlay" id="growth-modal">
-                <div class="modal">
-                    <div class="modal-title">Điều chỉnh chu kỳ sinh trưởng</div>
-                    <p style="font-size:0.875rem;color:#6b7280;margin-bottom:16px">
-                        Kéo dài giai đoạn hiện tại khi gặp thời tiết cực đoan hoặc cây chậm phát triển
-                    </p>
-                    <div class="form-group">
-                        <label class="form-label">Số ngày kéo dài</label>
-                        <input class="form-input" id="extend-days" type="number" value="0" min="0">
-                        <div class="form-helper">Hệ thống sẽ tự động dời các giai đoạn tiếp theo</div>
-                    </div>
-                    <div class="modal-actions">
-                        <button class="btn btn-outline" onclick="closeModal('growth-modal')">Hủy</button>
-                        <button class="btn btn-primary" onclick="applyGrowthAdjust()">Áp dụng</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- CONTROL -->
-        <div class="page" id="page-control">
-            <div class="page-header">
-                <div>
-                    <div class="page-title">Bảng Điều khiển</div>
-                    <div class="page-sub">Điều khiển tự động và ghi đè thủ công</div>
-                </div>
-            </div>
-            <div class="grid grid-2" style="margin-bottom:20px">
-                <div class="card" style="background:#f0fdf4;border-color:#bbf7d0">
-                    <div class="card-title">⚡ Chế độ Tự động</div>
-                    <p style="font-size:0.875rem;color:#6b7280;margin-bottom:12px">
-                        Hệ thống Rule Engine tự động điều khiển thiết bị dựa trên công thức sinh trưởng và dữ liệu cảm biến thời gian thực.
-                    </p>
-                    <div style="background:white;border-radius:8px;padding:12px;border:1px solid rgba(0,0,0,0.08)">
-                        <div style="font-size:0.75rem;color:#6b7280;margin-bottom:6px">Ví dụ luật tự động:</div>
-                        <code style="font-size:0.82rem">
-                            IF Nhiệt độ > Cấu hình + 2°C<br>
-                            THEN Bật quạt thông gió & Phun sương
-                        </code>
-                    </div>
-                </div>
-                <div class="card" style="background:#fffbeb;border-color:#fde68a">
-                    <div class="card-title">✍️ Chế độ Thủ công</div>
-                    <p style="font-size:0.875rem;color:#6b7280;margin-bottom:12px">
-                        Ghi đè tạm thời để can thiệp khẩn cấp. Hệ thống sẽ tự động trở về chế độ AUTO sau 2 giờ.
-                    </p>
-                    <div style="background:white;border-radius:8px;padding:12px;border:1px solid rgba(0,0,0,0.08)">
-                        <div style="font-size:0.75rem;color:#a16207;font-weight:600;margin-bottom:4px">⚠️ Lưu ý:</div>
-                        <div style="font-size:0.82rem">Rule Engine sẽ bỏ qua thiết bị ở chế độ MANUAL</div>
-                    </div>
-                </div>
-            </div>
-            <div class="grid grid-2" id="control-cards"></div>
-        </div>
-
-        <!-- ALERTS -->
-        <div class="page" id="page-alerts">
-            <div class="page-header">
-                <div>
-                    <div class="page-title">Hệ thống Cảnh báo</div>
-                    <div class="page-sub">Quản lý cảnh báo với cơ chế leo thang tự động</div>
-                </div>
-            </div>
-            <div class="grid grid-3" style="margin-bottom:20px">
-                <div class="card">
-                    <div style="font-size:2.5rem;font-weight:700;color:#ef4444" id="al-active-count">0</div>
-                    <div style="font-size:0.85rem;color:#6b7280">Cảnh báo đang hoạt động</div>
-                </div>
-                <div class="card">
-                    <div style="font-size:2.5rem;font-weight:700;color:#f59e0b" id="al-acked-count">0</div>
-                    <div style="font-size:0.85rem;color:#6b7280">Đã xác nhận</div>
-                </div>
-                <div class="card">
-                    <div style="font-size:2.5rem;font-weight:700" id="al-critical-count">0</div>
-                    <div style="font-size:0.85rem;color:#6b7280">Mức độ nghiêm trọng</div>
-                </div>
-            </div>
-            <div class="grid grid-8-4-full">
-                <div class="card">
-                    <div class="card-title">Danh sách cảnh báo</div>
-                    <div id="alert-list"></div>
-                </div>
-                <div class="card">
-                    <div class="card-title">Cơ chế Leo thang Cảnh báo</div>
-                    <ul class="timeline" id="escalation-timeline"></ul>
-                    <div style="background:#dbeafe;border-radius:8px;padding:12px;margin-top:12px;font-size:0.8rem">
-                        <div style="font-weight:600;margin-bottom:6px">Bộ lọc Debouncing & Throttling:</div>
-                        <div>• Lỗi > 5 phút mới xử lý</div>
-                        <div>• Tối đa 3 tin nhắn/giờ/mã lỗi</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- LOGS -->
-        <div class="page" id="page-logs">
-            <div class="page-header">
-                <div>
-                    <div class="page-title">Nhật ký Hệ thống</div>
-                    <div class="page-sub">Audit Trail - Theo dõi mọi thao tác của người dùng</div>
-                </div>
-            </div>
-            <div class="card" style="margin-bottom:16px">
-                <div class="grid grid-3">
-                    <div style="background:#dbeafe;border-radius:8px;padding:16px">
-                        <div style="font-size:2rem;font-weight:700;color:#3b82f6" id="log-total">0</div>
-                        <div style="font-size:0.85rem;color:#6b7280">Tổng số bản ghi</div>
-                    </div>
-                    <div style="background:#fef3c7;border-radius:8px;padding:16px">
-                        <div style="font-size:2rem;font-weight:700;color:#f59e0b" id="log-overrides">0</div>
-                        <div style="font-size:0.85rem;color:#6b7280">Thao tác ghi đè</div>
-                    </div>
-                    <div style="background:#dcfce7;border-radius:8px;padding:16px">
-                        <div style="font-size:2rem;font-weight:700;color:#10b981" id="log-users">0</div>
-                        <div style="font-size:0.85rem;color:#6b7280">Người dùng hoạt động</div>
-                    </div>
-                </div>
-            </div>
-            <div class="card">
-                <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-                    <div>
-                        <label class="form-label">Lọc theo hành động</label>
-                        <select class="form-select" id="log-filter-action" onchange="renderLogs()" style="width:180px">
-                            <option value="ALL">Tất cả</option>
-                            <option value="CREATE">Tạo mới</option>
-                            <option value="UPDATE">Cập nhật</option>
-                            <option value="DELETE">Xóa</option>
-                            <option value="OVERRIDE">Ghi đè</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="form-label">Lọc theo vai trò</label>
-                        <select class="form-select" id="log-filter-role" onchange="renderLogs()" style="width:200px">
-                            <option value="ALL">Tất cả</option>
-                            <option value="Super Admin">Super Admin</option>
-                            <option value="Agronomist">Kỹ sư Nông nghiệp</option>
-                            <option value="Operator">Người vận hành</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Thời gian</th>
-                                <th>Người dùng</th>
-                                <th>Vai trò</th>
-                                <th>Hành động</th>
-                                <th>Tài nguyên</th>
-                                <th>Giá trị cũ</th>
-                                <th>Giá trị mới</th>
-                                <th>IP Address</th>
-                            </tr>
-                        </thead>
-                        <tbody id="log-table"></tbody>
-                    </table>
-                </div>
-                <div style="background:#fef9c3;border-radius:8px;padding:12px;margin-top:16px;font-size:0.82rem">
-                    <div style="font-weight:600;margin-bottom:4px">🔒 Bảo mật Audit Trail:</div>
-                    <div>Không ai có quyền xóa hoặc chỉnh sửa bảng nhật ký này. Mọi thao tác đều được lưu trữ vĩnh viễn.</div>
-                </div>
-            </div>
-        </div>
+        <!-- Các trang (page) – nội dung sẽ được JavaScript động điền vào -->
+        <div class="page active" id="page-dashboard"></div>
+        <div class="page" id="page-devices"></div>
+        <div class="page" id="page-zones"></div>
+        <div class="page" id="page-growth"></div>
+        <div class="page" id="page-control"></div>
+        <div class="page" id="page-alerts"></div>
+        <div class="page" id="page-logs"></div>
     </main>
 
+    <!-- Vùng chứa thông báo toast -->
     <div id="toast-container"></div>
+
+    <!-- Ứng dụng JavaScript nhập từ file app.js (dạng module) -->
     <script type="module" src="js/app.js"></script>
 </body>
 </html>
