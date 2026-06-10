@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quản lý Nhà kính Trồng hoa</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/pages.css">
+</head>
+<body>
+<nav id="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">&#127807;</div>
+    <div><div class="sidebar-title">Nh&#224; k&#237;nh</div><div class="sidebar-sub">Qu&#7843;n l&#253; tr&#7891;ng hoa</div></div>
+  </div>
+  <div class="sidebar-nav">
+    <a class="nav-item active" data-page="dashboard" href="#"><span class="nav-icon">&#128202;</span> Dashboard</a>
+    <a class="nav-item" data-page="devices" href="#"><span class="nav-icon">&#128225;</span> Thi&#7871;t b&#7883; IoT</a>
+    <a class="nav-item" data-page="zones" href="#"><span class="nav-icon">&#128193;</span> Qu&#7843;n l&#253; v&#249;ng</a>
+    <a class="nav-item" data-page="growth" href="#"><span class="nav-icon">&#127807;</span> Chu k&#7923; sinh tr&#432;&#7903;ng</a>
+    <a class="nav-item" data-page="control" href="#"><span class="nav-icon">&#127905;</span> &#272;i&#7873;u khi&#7875;n</a>
+    <a class="nav-item" data-page="alerts" href="#"><span class="nav-icon">&#128276;</span> C&#7843;nh b&#225;o</a>
+    <a class="nav-item" data-page="logs" href="#"><span class="nav-icon">&#128203;</span> Nh&#7853;t k&#253; h&#7879; th&#7889;ng</a>
+  </div>
+</nav>
+<main id="main">
+  <!-- DASHBOARD -->
+  <div class="page active" id="page-dashboard">
+    <div class="page-header"><div><div class="page-title">Dashboard T&#7893;ng quan</div><div class="page-sub">Gi&#225;m s&#225;t th&#7901;i gian th&#7921;c c&#225;c ch&#7881; s&#7889; m&#244;i tr&#432;&#7901;ng nh&#224; k&#237;nh</div></div></div>
+    <div class="grid grid-4" style="margin-bottom:20px">
+      <div class="card"><div class="stat-icon" style="background:#fef3c7;color:#f59e0b">&#127777;&#65039;</div><div class="stat-label">Nhi&#7879;t &#273;&#7897; TB</div><div class="stat-value">24.5&#176;C</div><span class="chip chip-default" style="margin-top:6px">B&#236;nh th&#432;&#7901;ng</span></div>
+      <div class="card"><div class="stat-icon" style="background:#dbeafe;color:#3b82f6">&#128167;</div><div class="stat-label">&#272;&#7897; &#7849;m TB</div><div class="stat-value">72%</div><span class="chip chip-default" style="margin-top:6px">B&#236;nh th&#432;&#7901;ng</span></div>
+      <div class="card"><div class="stat-icon" style="background:#fef3c7;color:#f59e0b">&#9728;&#65039;</div><div class="stat-label">C&#432;&#7901;ng &#273;&#7897; s&#225;ng</div><div class="stat-value">550 lux</div><span class="chip chip-warning" style="margin-top:6px">Cao</span></div>
+      <div class="card"><div class="stat-icon" style="background:#d1fae5;color:#10b981">&#127783;&#65039;</div><div class="stat-label">CO2</div><div class="stat-value">485 ppm</div><span class="chip chip-success" style="margin-top:6px">T&#7889;i &#432;u</span></div>
+    </div>
+    <div class="grid grid-8-4" style="margin-bottom:20px">
+      <div class="card"><div class="card-title">Bi&#7871;n &#273;&#7897;ng 24 gi&#7901; qua</div><div class="chart-container" style="height:300px"><canvas id="areaChart"></canvas></div></div>
+      <div class="card"><div class="card-title">C&#226;n b&#7857;ng m&#244;i tr&#432;&#7901;ng</div><div class="chart-container" style="height:300px"><canvas id="radarChart"></canvas></div></div>
+    </div>
+    <div class="card"><div class="card-title">Xu h&#432;&#7899;ng &#225;nh s&#225;ng &amp; CO2</div><div class="chart-container" style="height:250px"><canvas id="lineChart"></canvas></div></div>
+  </div>
+  <!-- DEVICES -->
+  <div class="page" id="page-devices">
+    <div class="page-header"><div><div class="page-title">Qu&#7843;n l&#253; Thi&#7871;t b&#7883; IoT</div><div class="page-sub">Theo d&#245;i v&#242;ng &#273;&#7901;i v&#224; s&#7913;c kh&#7887;e thi&#7871;t b&#7883; c&#7843;m bi&#7871;n</div></div><button class="btn btn-primary" onclick="void 0">&#10133; Th&#234;m thi&#7871;t b&#7883;</button></div>
+    <div class="grid grid-4" id="device-stats" style="margin-bottom:20px"></div>
+    <div class="card"><div class="card-title">Danh s&#225;ch thi&#7871;t b&#7883;</div><div class="table-wrap"><table><thead><tr><th>T&#234;n thi&#7871;t b&#7883;</th><th>Lo&#7841;i</th><th>MAC Address</th><th>Khu v&#7921;c</th><th>Tr&#7841;ng th&#225;i</th><th>Pin</th><th>Heartbeat cu&#7889;i</th><th>Thao t&#225;c</th></tr></thead><tbody id="device-table"></tbody></table></div></div>
+    <div class="modal-overlay" id="device-modal">
+      <div class="modal">
+        <div class="modal-title">Ph&#234; duy&#7879;t thi&#7871;t b&#7883; m&#7899;i</div>
+        <div class="form-group"><label class="form-label">T&#234;n thi&#7871;t b&#7883;</label><input class="form-input" id="dev-name" type="text"></div>
+        <div class="form-group"><label class="form-label">Lo&#7841;i thi&#7871;t b&#7883;</label><select class="form-select" id="dev-type"><option value="Temperature">Nhi&#7879;t &#273;&#7897;</option><option value="Humidity">&#272;&#7897; &#7849;m</option><option value="Light">&#193;nh s&#225;ng</option><option value="CO2">CO2</option><option value="Actuator">&#272;i&#7873;u khi&#7875;n</option></select></div>
+        <div class="form-group"><label class="form-label">G&#225;n v&#224;o khu v&#7921;c</label><select class="form-select" id="dev-zone"><option value="Khu A - Gi&#224;n 1">Khu A - Gi&#224;n 1</option><option value="Khu A - Gi&#224;n 2">Khu A - Gi&#224;n 2</option><option value="Khu B - Gi&#224;n 1">Khu B - Gi&#224;n 1</option><option value="Khu B - Gi&#224;n 2">Khu B - Gi&#224;n 2</option></select></div>
+        <div class="form-group"><label class="form-label">MAC Address</label><input class="form-input" id="dev-mac" type="text" disabled></div>
+        <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal('device-modal')">H&#7911;y</button><button class="btn btn-primary" onclick="approveDevice()">Ph&#234; duy&#7879;t &amp; K&#237;ch ho&#7841;t</button></div>
+      </div>
+    </div>
+  </div>
+  <!-- ZONES -->
+  <div class="page" id="page-zones">
+    <div class="page-header"><div><div class="page-title">Qu&#7843;n l&#253; V&#249;ng tr&#7891;ng</div><div class="page-sub">Ph&#226;n v&#249;ng qu&#7843;n l&#253; v&#224; tr&#7921;c quan h&#243;a c&#7845;u tr&#250;c nh&#224; k&#237;nh</div></div><button class="btn btn-primary">&#10133; Th&#234;m khu v&#7921;c</button></div>
+    <div class="grid grid-5-7"><div class="card"><div class="card-title">C&#7845;u tr&#250;c ph&#226;n c&#7845;p</div><div id="zone-tree"></div></div><div class="card" id="zone-detail"><div style="display:flex;align-items:center;justify-content:center;min-height:400px;text-align:center;color:#9ca3af"><div><div style="font-size:2rem;margin-bottom:8px">&#128193;</div><div style="font-size:1rem;font-weight:500;margin-bottom:4px">Ch&#7885;n m&#7897;t khu v&#7921;c</div><div style="font-size:0.85rem">Ch&#7885;n m&#7897;t khu v&#7921;c t&#7915; c&#226;y ph&#226;n c&#7845;p &#273;&#7875; xem chi ti&#7871;t</div></div></div></div></div>
+  </div>
+  <!-- GROWTH -->
+  <div class="page" id="page-growth">
+    <div class="page-header"><div><div class="page-title">Chu k&#7923; Sinh tr&#432;&#7903;ng</div><div class="page-sub">Theo d&#245;i v&#224; &#273;i&#7873;u ch&#7881;nh c&#244;ng th&#7913;c sinh tr&#432;&#7903;ng</div></div><button class="btn btn-primary">&#10133; T&#7841;o c&#244;ng th&#7913;c m&#7899;i</button></div>
+    <div id="growth-list"></div>
+    <div class="modal-overlay" id="growth-modal"><div class="modal"><div class="modal-title">&#272;i&#7873;u ch&#7881;nh chu k&#7923; sinh tr&#432;&#7903;ng</div><p style="font-size:0.875rem;color:#6b7280;margin-bottom:16px">K&#233;o d&#224;i giai &#273;o&#7841;n hi&#7879;n t&#7841;i khi g&#7863;p th&#7901;i ti&#7871;t c&#7921;c &#273;oan ho&#7863;c c&#226;y ch&#7853;m ph&#225;t tri&#7875;n</p><div class="form-group"><label class="form-label">S&#7889; ng&#224;y k&#233;o d&#224;i</label><input class="form-input" id="extend-days" type="number" value="0" min="0"><div class="form-helper">H&#7879; th&#7889;ng s&#7869; t&#7921; &#273;&#7897;ng d&#7901;i c&#225;c giai &#273;o&#7841;n ti&#7871;p theo</div></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal('growth-modal')">H&#7911;y</button><button class="btn btn-primary" onclick="applyGrowthAdjust()">&#193;p d&#7909;ng</button></div></div></div>
+  </div>
+  <!-- CONTROL -->
+  <div class="page" id="page-control">
+    <div class="page-header"><div><div class="page-title">B&#7843;ng &#272;i&#7873;u khi&#7875;n</div><div class="page-sub">&#272;i&#7873;u khi&#7875;n t&#7921; &#273;&#7897;ng v&#224; ghi &#273;&#232; th&#7911; c&#244;ng</div></div></div>
+    <div class="grid grid-2" style="margin-bottom:20px">
+      <div class="card" style="background:#f0fdf4;border-color:#bbf7d0"><div class="card-title">&#9889; Ch&#7871; &#273;&#7897; T&#7921; &#273;&#7897;ng</div><p style="font-size:0.875rem;color:#6b7280;margin-bottom:12px">H&#7879; th&#7889;ng Rule Engine t&#7921; &#273;&#7897;ng &#273;i&#7873;u khi&#7875;n thi&#7871;t b&#7883; d&#7921;a tr&#234;n c&#244;ng th&#7913;c sinh tr&#432;&#7903;ng v&#224; d&#7919; li&#7879;u c&#7843;m bi&#7871;n th&#7901;i gian th&#7921;c.</p><div style="background:white;border-radius:8px;padding:12px;border:1px solid rgba(0,0,0,0.08)"><div style="font-size:0.75rem;color:#6b7280;margin-bottom:6px">V&#237; d&#7909; lu&#7853;t t&#7921; &#273;&#7897;ng:</div><code style="font-size:0.82rem">IF Nhi&#7879;t &#273;&#7897; &gt; C&#7845;u h&#236;nh + 2&#176;C<br>THEN B&#7853;t qu&#7841;t th&#244;ng gi&#243; &amp; Phun s&#432;&#417;ng</code></div></div>
+      <div class="card" style="background:#fffbeb;border-color:#fde68a"><div class="card-title">&#9995; Ch&#7871; &#273;&#7897; Th&#7911; c&#244;ng</div><p style="font-size:0.875rem;color:#6b7280;margin-bottom:12px">Ghi &#273;&#232; t&#7841;m th&#7901;i &#273;&#7875; can thi&#7879;p kh&#7849;n c&#7845;p. H&#7879; th&#7889;ng s&#7869; t&#7921; &#273;&#7897;ng tr&#7903; v&#7873; ch&#7871; &#273;&#7897; AUTO sau 2 gi&#7901;.</p><div style="background:white;border-radius:8px;padding:12px;border:1px solid rgba(0,0,0,0.08)"><div style="font-size:0.75rem;color:#a16207;font-weight:600;margin-bottom:4px">&#9888;&#65039; L&#432;u &#253;:</div><div style="font-size:0.82rem">Rule Engine s&#7869; b&#7887; qua thi&#7871;t b&#7883; &#7903; ch&#7871; &#273;&#7897; MANUAL</div></div></div>
+    </div>
+    <div class="grid grid-2" id="control-cards"></div>
+  </div>
+  <!-- ALERTS -->
+  <div class="page" id="page-alerts">
+    <div class="page-header"><div><div class="page-title">H&#7879; th&#7889;ng C&#7843;nh b&#225;o</div><div class="page-sub">Qu&#7843;n l&#253; c&#7843;nh b&#225;o v&#7899;i c&#417; ch&#7871; leo thang t&#7921; &#273;&#7897;ng</div></div></div>
+    <div class="grid grid-3" style="margin-bottom:20px">
+      <div class="card"><div style="font-size:2.5rem;font-weight:700;color:#ef4444" id="al-active-count">0</div><div style="font-size:0.85rem;color:#6b7280">C&#7843;nh b&#225;o &#273;ang ho&#7841;t &#273;&#7897;ng</div></div>
+      <div class="card"><div style="font-size:2.5rem;font-weight:700;color:#f59e0b" id="al-acked-count">0</div><div style="font-size:0.85rem;color:#6b7280">&#272;&#227; x&#225;c nh&#7853;n</div></div>
+      <div class="card"><div style="font-size:2.5rem;font-weight:700" id="al-critical-count">0</div><div style="font-size:0.85rem;color:#6b7280">M&#7913;c &#273;&#7897; nghi&#234;m tr&#7885;ng</div></div>
+    </div>
+    <div class="grid grid-8-4-full">
+      <div class="card"><div class="card-title">Danh s&#225;ch c&#7843;nh b&#225;o</div><div id="alert-list"></div></div>
+      <div class="card"><div class="card-title">C&#417; ch&#7871; Leo thang C&#7843;nh b&#225;o</div><ul class="timeline" id="escalation-timeline"></ul><div style="background:#dbeafe;border-radius:8px;padding:12px;margin-top:12px;font-size:0.8rem"><div style="font-weight:600;margin-bottom:6px">B&#7897; l&#7885;c Debouncing &amp; Throttling:</div><div>&#8226; L&#7895;i &gt; 5 ph&#250;t m&#7899;i x&#7917; l&#253;</div><div>&#8226; T&#7889;i &#273;a 3 tin nh&#7855;n/gi&#7901;/m&#227; l&#7895;i</div></div></div>
+    </div>
+  </div>
+  <!-- LOGS -->
+  <div class="page" id="page-logs">
+    <div class="page-header"><div><div class="page-title">Nh&#7853;t k&#253; H&#7879; th&#7889;ng</div><div class="page-sub">Audit Trail - Theo d&#245;i m&#7885;i thao t&#225;c c&#7911;a ng&#432;&#7901;i d&#249;ng</div></div></div>
+    <div class="card" style="margin-bottom:16px"><div class="grid grid-3">
+      <div style="background:#dbeafe;border-radius:8px;padding:16px"><div style="font-size:2rem;font-weight:700;color:#3b82f6" id="log-total">0</div><div style="font-size:0.85rem;color:#6b7280">T&#7893;ng s&#7889; b&#7843;n ghi</div></div>
+      <div style="background:#fef3c7;border-radius:8px;padding:16px"><div style="font-size:2rem;font-weight:700;color:#f59e0b" id="log-overrides">0</div><div style="font-size:0.85rem;color:#6b7280">Thao t&#225;c ghi &#273;&#232;</div></div>
+      <div style="background:#dcfce7;border-radius:8px;padding:16px"><div style="font-size:2rem;font-weight:700;color:#10b981" id="log-users">0</div><div style="font-size:0.85rem;color:#6b7280">Ng&#432;&#7901;i d&#249;ng ho&#7841;t &#273;&#7897;ng</div></div>
+    </div></div>
+    <div class="card">
+      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+        <div><label class="form-label">L&#7885;c theo h&#224;nh &#273;&#7897;ng</label><select class="form-select" id="log-filter-action" onchange="renderLogs()" style="width:180px"><option value="ALL">T&#7845;t c&#7843;</option><option value="CREATE">T&#7841;o m&#7899;i</option><option value="UPDATE">C&#7853;p nh&#7853;t</option><option value="DELETE">X&#243;a</option><option value="OVERRIDE">Ghi &#273;&#232;</option></select></div>
+        <div><label class="form-label">L&#7885;c theo vai tr&#242;</label><select class="form-select" id="log-filter-role" onchange="renderLogs()" style="width:200px"><option value="ALL">T&#7845;t c&#7843;</option><option value="Super Admin">Super Admin</option><option value="Agronomist">K&#7929; s&#432; N&#244;ng nghi&#7879;p</option><option value="Operator">Ng&#432;&#7901;i v&#7853;n h&#224;nh</option></select></div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Th&#7901;i gian</th><th>Ng&#432;&#7901;i d&#249;ng</th><th>Vai tr&#242;</th><th>H&#224;nh &#273;&#7897;ng</th><th>T&#224;i nguy&#234;n</th><th>Gi&#225; tr&#7883; c&#361;</th><th>Gi&#225; tr&#7883; m&#7899;i</th><th>IP Address</th></tr></thead><tbody id="log-table"></tbody></table></div>
+      <div style="background:#fef9c3;border-radius:8px;padding:12px;margin-top:16px;font-size:0.82rem"><div style="font-weight:600;margin-bottom:4px">&#128274; B&#7843;o m&#7853;t Audit Trail:</div><div>Kh&#244;ng ai c&#243; quy&#7873;n x&#243;a ho&#7863;c ch&#7881;nh s&#7917;a b&#7843;ng nh&#7853;t k&#253; n&#224;y. M&#7885;i thao t&#225;c &#273;&#7873;u &#273;&#432;&#7907;c l&#432;u tr&#7919; v&#297;nh vi&#7877;n.</div></div>
+    </div>
+  </div>
+</main>
+<div id="toast-container"></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
