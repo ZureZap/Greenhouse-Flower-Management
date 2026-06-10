@@ -66,6 +66,60 @@ export function approveDevice() {
   showToast('Thiết bị đã được phê duyệt và kích hoạt');
 }
 
+// Hiển thị modal thêm thiết bị mới (không phải phê duyệt)
+export function showAddDeviceModal() {
+  // Reset form
+  document.getElementById('dev-name').value = '';
+  document.getElementById('dev-type').value = 'Temperature';
+  document.getElementById('dev-zone').value = 'Khu A - Giàn 1';
+  // Tạo MAC giả
+  const fakeMac = 'AA:BB:CC:' + Math.floor(Math.random()*0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
+  document.getElementById('dev-mac').value = fakeMac;
+  // Lưu ý: cần phân biệt chế độ "thêm mới" và "phê duyệt"
+  // Có thể dùng một biến toàn cục tạm: window._addingNew = true
+  window._addingNew = true;
+  openModal('device-modal');
+}
+
+// Sửa hàm approveDevice để xử lý cả thêm mới và phê duyệt
+export function approveDevice() {
+  const name = document.getElementById('dev-name').value;
+  const type = document.getElementById('dev-type').value;
+  const zone = document.getElementById('dev-zone').value;
+  const mac = document.getElementById('dev-mac').value;
+  
+  if (window._addingNew) {
+    // Thêm thiết bị mới (trạng thái ACTIVE luôn, hoặc PENDING tùy logic)
+    const newDevice = {
+      id: Date.now().toString(),
+      name,
+      type,
+      macAddress: mac,
+      zone,
+      status: 'ACTIVE',
+      lastHeartbeat: new Date(),
+      batteryLevel: type !== 'Actuator' ? 100 : undefined
+    };
+    state.devices.push(newDevice);
+    showToast('Đã thêm thiết bị mới');
+    window._addingNew = false;
+  } else {
+    // Phê duyệt thiết bị đang chờ (code cũ)
+    const id = state.pendingDeviceId;
+    const dev = state.devices.find(d => d.id === id);
+    if (dev) {
+      dev.name = name;
+      dev.type = type;
+      dev.zone = zone;
+      dev.status = 'ACTIVE';
+      showToast('Thiết bị đã được phê duyệt');
+    }
+  }
+  closeModal('device-modal');
+  renderDevices();
+}
+
 // Expose to global for inline onclick
 window.openDeviceApproval = openDeviceApproval;
 window.approveDevice = approveDevice;
+window.showAddDeviceModal = showAddDeviceModal;
