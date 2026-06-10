@@ -26,6 +26,7 @@
   </div>
 </nav>
 <main id="main">
+  
   <!-- DASHBOARD -->
   <div class="page active" id="page-dashboard">
     <div class="page-header"><div><div class="page-title">Dashboard T&#7893;ng quan</div><div class="page-sub">Gi&#225;m s&#225;t th&#7901;i gian th&#7921;c c&#225;c ch&#7881; s&#7889; m&#244;i tr&#432;&#7901;ng nh&#224; k&#237;nh</div></div></div>
@@ -41,6 +42,7 @@
     </div>
     <div class="card"><div class="card-title">Xu h&#432;&#7899;ng &#225;nh s&#225;ng &amp; CO2</div><div class="chart-container" style="height:250px"><canvas id="lineChart"></canvas></div></div>
   </div>
+  
   <!-- DEVICES -->
   <div class="page" id="page-devices">
     <div class="page-header"><div><div class="page-title">Qu&#7843;n l&#253; Thi&#7871;t b&#7883; IoT</div><div class="page-sub">Theo d&#245;i v&#242;ng &#273;&#7901;i v&#224; s&#7913;c kh&#7887;e thi&#7871;t b&#7883; c&#7843;m bi&#7871;n</div></div><button class="btn btn-primary" onclick="void 0">&#10133; Th&#234;m thi&#7871;t b&#7883;</button></div>
@@ -57,17 +59,20 @@
       </div>
     </div>
   </div>
+  
   <!-- ZONES -->
   <div class="page" id="page-zones">
     <div class="page-header"><div><div class="page-title">Qu&#7843;n l&#253; V&#249;ng tr&#7891;ng</div><div class="page-sub">Ph&#226;n v&#249;ng qu&#7843;n l&#253; v&#224; tr&#7921;c quan h&#243;a c&#7845;u tr&#250;c nh&#224; k&#237;nh</div></div><button class="btn btn-primary">&#10133; Th&#234;m khu v&#7921;c</button></div>
     <div class="grid grid-5-7"><div class="card"><div class="card-title">C&#7845;u tr&#250;c ph&#226;n c&#7845;p</div><div id="zone-tree"></div></div><div class="card" id="zone-detail"><div style="display:flex;align-items:center;justify-content:center;min-height:400px;text-align:center;color:#9ca3af"><div><div style="font-size:2rem;margin-bottom:8px">&#128193;</div><div style="font-size:1rem;font-weight:500;margin-bottom:4px">Ch&#7885;n m&#7897;t khu v&#7921;c</div><div style="font-size:0.85rem">Ch&#7885;n m&#7897;t khu v&#7921;c t&#7915; c&#226;y ph&#226;n c&#7845;p &#273;&#7875; xem chi ti&#7871;t</div></div></div></div></div>
   </div>
+  
   <!-- GROWTH -->
   <div class="page" id="page-growth">
     <div class="page-header"><div><div class="page-title">Chu k&#7923; Sinh tr&#432;&#7903;ng</div><div class="page-sub">Theo d&#245;i v&#224; &#273;i&#7873;u ch&#7881;nh c&#244;ng th&#7913;c sinh tr&#432;&#7903;ng</div></div><button class="btn btn-primary">&#10133; T&#7841;o c&#244;ng th&#7913;c m&#7899;i</button></div>
     <div id="growth-list"></div>
     <div class="modal-overlay" id="growth-modal"><div class="modal"><div class="modal-title">&#272;i&#7873;u ch&#7881;nh chu k&#7923; sinh tr&#432;&#7903;ng</div><p style="font-size:0.875rem;color:#6b7280;margin-bottom:16px">K&#233;o d&#224;i giai &#273;o&#7841;n hi&#7879;n t&#7841;i khi g&#7863;p th&#7901;i ti&#7871;t c&#7921;c &#273;oan ho&#7863;c c&#226;y ch&#7853;m ph&#225;t tri&#7875;n</p><div class="form-group"><label class="form-label">S&#7889; ng&#224;y k&#233;o d&#224;i</label><input class="form-input" id="extend-days" type="number" value="0" min="0"><div class="form-helper">H&#7879; th&#7889;ng s&#7869; t&#7921; &#273;&#7897;ng d&#7901;i c&#225;c giai &#273;o&#7841;n ti&#7871;p theo</div></div><div class="modal-actions"><button class="btn btn-outline" onclick="closeModal('growth-modal')">H&#7911;y</button><button class="btn btn-primary" onclick="applyGrowthAdjust()">&#193;p d&#7909;ng</button></div></div></div>
   </div>
+  
   <!-- CONTROL -->
   <div class="page" id="page-control">
     <div class="page-header"><div><div class="page-title">B&#7843;ng &#272;i&#7873;u khi&#7875;n</div><div class="page-sub">&#272;i&#7873;u khi&#7875;n t&#7921; &#273;&#7897;ng v&#224; ghi &#273;&#232; th&#7911; c&#244;ng</div></div></div>
@@ -77,6 +82,7 @@
     </div>
     <div class="grid grid-2" id="control-cards"></div>
   </div>
+  
   <!-- ALERTS -->
   <div class="page" id="page-alerts">
     <div class="page-header"><div><div class="page-title">H&#7879; th&#7889;ng C&#7843;nh b&#225;o</div><div class="page-sub">Qu&#7843;n l&#253; c&#7843;nh b&#225;o v&#7899;i c&#417; ch&#7871; leo thang t&#7921; &#273;&#7897;ng</div></div></div>
@@ -90,6 +96,7 @@
       <div class="card"><div class="card-title">C&#417; ch&#7871; Leo thang C&#7843;nh b&#225;o</div><ul class="timeline" id="escalation-timeline"></ul><div style="background:#dbeafe;border-radius:8px;padding:12px;margin-top:12px;font-size:0.8rem"><div style="font-weight:600;margin-bottom:6px">B&#7897; l&#7885;c Debouncing &amp; Throttling:</div><div>&#8226; L&#7895;i &gt; 5 ph&#250;t m&#7899;i x&#7917; l&#253;</div><div>&#8226; T&#7889;i &#273;a 3 tin nh&#7855;n/gi&#7901;/m&#227; l&#7895;i</div></div></div>
     </div>
   </div>
+  
   <!-- LOGS -->
   <div class="page" id="page-logs">
     <div class="page-header"><div><div class="page-title">Nh&#7853;t k&#253; H&#7879; th&#7889;ng</div><div class="page-sub">Audit Trail - Theo d&#245;i m&#7885;i thao t&#225;c c&#7911;a ng&#432;&#7901;i d&#249;ng</div></div></div>
