@@ -212,3 +212,135 @@ tr:hover td {
     position: relative;
     width: 100%;
 }
+
+/* ===================== ZONES PAGE ENHANCEMENTS ===================== */
+.zone-search-bar {
+    margin-bottom: 8px;
+}
+.zone-tree-node {
+    cursor: pointer;
+}
+.tree-toggle {
+    cursor: pointer;
+    display: inline-block;
+    width: 20px;
+    text-align: center;
+    user-select: none;
+}
+.empty-detail {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 400px;
+    color: #9ca3af;
+    font-size: 1rem;
+}
+.detail-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 12px;
+}
+.detail-icon {
+    width: 48px;
+    height: 48px;
+    background: #10b981;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}
+.detail-title {
+    flex: 1;
+}
+.detail-title div:first-child {
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+.detail-type {
+    font-size: 0.8rem;
+    color: #6b7280;
+}
+.detail-actions {
+    display: flex;
+    gap: 8px;
+}
+.zone-metrics {
+    margin-bottom: 20px;
+}
+.metric-card {
+    background: #fef3c7;
+    border-radius: 12px;
+    padding: 12px;
+    text-align: center;
+    font-size: 0.9rem;
+}
+.metric-card.hum {
+    background: #dbeafe;
+}
+.subtitle {
+    font-weight: 600;
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+}
+.zone-children {
+    margin-bottom: 16px;
+}
+.child-card {
+    background: #f9fafb;
+    padding: 12px;
+    position: relative;
+}
+.child-icon {
+    margin-right: 6px;
+}
+.child-devices {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-top: 6px;
+}
+.child-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 6px;
+}
+.rack-info {
+    background: #f3f4f6;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 12px;
+}
+.no-result {
+    padding: 20px;
+    text-align: center;
+    color: #9ca3af;
+}
+
+/* ===================== DROPDOWN MENU (nút ba chấm) ===================== */
+.device-action-menu {
+    position: absolute;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    z-index: 1000;
+    min-width: 120px;
+    overflow: hidden;
+}
+.action-menu-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.action-menu-item:hover {
+    background: #f3f4f6;
+}
+.action-menu-item[data-action="delete"]:hover {
+    background: #fee2e2;
+    color: #dc2626;
+}

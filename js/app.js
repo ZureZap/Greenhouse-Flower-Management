@@ -1,9 +1,3 @@
-/**
- * app.js
- * Ứng dụng chính - điều phối các trang, xử lý điều hướng, modal và thông báo.
- * Mỗi trang được quản lý bởi một module riêng (dashboard, devices, zones, growth, control, alerts, logs).
- */
-
 import { state } from './state.js';
 import { renderDashboardPage } from './dashboard.js';
 import { renderDevicesPage } from './devices.js';
@@ -12,14 +6,11 @@ import { renderGrowthPage } from './growth.js';
 import { renderControlPage } from './control.js';
 import { renderAlertsPage } from './alerts.js';
 import { renderLogsPage } from './logs.js';
+import { renderLoginPage } from './pages/login.js';
+import { renderRegisterPage } from './pages/register.js';
+import { renderUserApprovalPage } from './pages/userApproval.js';
+import { isLoggedIn, logout, getCurrentUser } from './auth.js';
 
-// ===================== CÁC TIỆN ÍCH CHUNG =====================
-
-/**
- * Hiển thị thông báo dạng toast
- * @param {string} msg - Nội dung thông báo
- * @param {string} type - Loại: 'success', 'warning', 'info', 'error'
- */
 export function showToast(msg, type = 'success') {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
@@ -29,76 +20,141 @@ export function showToast(msg, type = 'success') {
     setTimeout(() => toast.remove(), 3000);
 }
 
-/**
- * Mở modal theo ID
- * @param {string} id - ID của phần tử modal (phải có class 'modal-overlay')
- */
 export function openModal(id) {
     const modal = document.getElementById(id);
     if (modal) modal.classList.add('open');
 }
 
-/**
- * Đóng modal theo ID
- * @param {string} id - ID của phần tử modal
- */
 export function closeModal(id) {
     const modal = document.getElementById(id);
     if (modal) modal.classList.remove('open');
 }
 
-// ===================== ĐIỀU HƯỚNG CÁC TRANG =====================
+// ===================== ROUTING =====================
+let isAuth = false;
 
-// Xử lý sự kiện click trên thanh menu
+function renderPage(pageName) {
+    const pageMap = {
+        dashboard: renderDashboardPage,
+        devices: renderDevicesPage,
+        zones: renderZonesPage,
+        growth: renderGrowthPage,
+        control: renderControlPage,
+        alerts: renderAlertsPage,
+        logs: renderLogsPage,
+        login: renderLoginPage,
+        register: renderRegisterPage,
+        'user-approval': renderUserApprovalPage
+    };
+    const renderFn = pageMap[pageName];
+    if (renderFn) renderFn();
+    else renderDashboardPage();
+}
+
+function handleRoute() {
+    let hash = window.location.hash.slice(1) || 'dashboard';
+    const publicPages = ['login', 'register'];
+    const isPublic = publicPages.includes(hash);
+    
+    if (!isAuth && !isPublic) {
+        window.location.hash = 'login';
+        return;
+    }
+    if (isAuth && isPublic) {
+        window.location.hash = 'dashboard';
+        return;
+    }
+    // Cập nhật active menu (chỉ khi đã đăng nhập và không phải public)
+    if (isAuth && !isPublic) {
+        document.querySelectorAll('.nav-item').forEach(item => {
+            if (item.dataset.page === hash) item.classList.add('active');
+            else item.classList.remove('active');
+        });
+    }
+    document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+    const activePage = document.getElementById(`page-${hash}`);
+    if (activePage) activePage.classList.add('active');
+    renderPage(hash);
+}
+
+function addLogoutButton() {
+    const nav = document.querySelector('.sidebar-nav');
+    if (!nav || document.getElementById('logout-item')) return;
+    const logoutBtn = document.createElement('a');
+    logoutBtn.id = 'logout-item';
+    logoutBtn.className = 'nav-item';
+    logoutBtn.href = '#';
+    logoutBtn.innerHTML = '<span class="nav-icon">🚪</span> Đăng xuất';
+    logoutBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        logout();
+        isAuth = false;
+        window.location.hash = 'login';
+        window.dispatchEvent(new Event('auth-changed'));
+        document.getElementById('sidebar').style.display = 'none';
+    });
+    nav.appendChild(logoutBtn);
+}
+
+function addOwnerMenu() {
+    const nav = document.querySelector('.sidebar-nav');
+    if (!nav || document.getElementById('owner-approval-item')) return;
+    const currentUser = getCurrentUser();
+    if (currentUser && currentUser.role === 'OWNER') {
+        const approvalItem = document.createElement('a');
+        approvalItem.id = 'owner-approval-item';
+        approvalItem.className = 'nav-item';
+        approvalItem.href = '#';
+        approvalItem.innerHTML = '<span class="nav-icon">✅</span> Phê duyệt tài khoản';
+        approvalItem.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.location.hash = 'user-approval';
+        });
+        // Chèn trước nút logout
+        const logoutBtn = document.getElementById('logout-item');
+        if (logoutBtn) nav.insertBefore(approvalItem, logoutBtn);
+        else nav.appendChild(approvalItem);
+    }
+}
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    if (isAuth) {
+        sidebar.style.display = 'flex';
+        addLogoutButton();
+        addOwnerMenu();
+    } else {
+        sidebar.style.display = 'none';
+    }
+}
+
+// Khởi tạo
+isAuth = isLoggedIn();
+toggleSidebar();
+
+window.addEventListener('hashchange', () => handleRoute());
+window.addEventListener('auth-changed', () => {
+    isAuth = isLoggedIn();
+    toggleSidebar();
+    handleRoute();
+});
+
 document.querySelectorAll('.nav-item').forEach(menuItem => {
-    menuItem.addEventListener('click', event => {
-        event.preventDefault();
-        const pageName = menuItem.dataset.page;   // 'dashboard', 'devices', ...
-
-        // Cập nhật trạng thái active cho menu
-        document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
-        menuItem.classList.add('active');
-
-        // Ẩn tất cả các trang, hiển thị trang được chọn
-        document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
-        document.getElementById(`page-${pageName}`).classList.add('active');
-
-        // Gọi hàm render tương ứng cho từng trang
-        switch (pageName) {
-            case 'dashboard': renderDashboardPage(); break;
-            case 'devices':   renderDevicesPage();   break;
-            case 'zones':     renderZonesPage();     break;
-            case 'growth':    renderGrowthPage();    break;
-            case 'control':   renderControlPage();   break;
-            case 'alerts':    renderAlertsPage();    break;
-            case 'logs':      renderLogsPage();      break;
-            default: break;
-        }
+    menuItem.addEventListener('click', (e) => {
+        if (!isAuth) return;
+        e.preventDefault();
+        const pageName = menuItem.dataset.page;
+        if (pageName) window.location.hash = pageName;
     });
 });
 
-// Khi tải trang lần đầu, xác định trang đang active (mặc định là dashboard)
-const activePage = document.querySelector('.page.active')?.id?.replace('page-', '') || 'dashboard';
-switch (activePage) {
-    case 'dashboard': renderDashboardPage(); break;
-    case 'devices':   renderDevicesPage();   break;
-    case 'zones':     renderZonesPage();     break;
-    case 'growth':    renderGrowthPage();    break;
-    case 'control':   renderControlPage();   break;
-    case 'alerts':    renderAlertsPage();    break;
-    case 'logs':      renderLogsPage();      break;
-    default: renderDashboardPage();
-}
-
-// ===================== XỬ LÝ MODAL =====================
-
-// Đóng modal khi click ra ngoài vùng nội dung (event delegation)
-document.body.addEventListener('click', (event) => {
-    if (event.target.classList && event.target.classList.contains('modal-overlay')) {
-        event.target.classList.remove('open');
+document.body.addEventListener('click', (e) => {
+    if (e.target.classList?.contains('modal-overlay')) {
+        e.target.classList.remove('open');
     }
 });
 
-// Expose các hàm tiện ích ra window để có thể gọi từ inline onclick
 window.closeModal = closeModal;
 window.openModal = openModal;
+
+handleRoute();

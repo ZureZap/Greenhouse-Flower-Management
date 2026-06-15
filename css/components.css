@@ -78,6 +78,11 @@
     transition: all 0.15s;
 }
 
+.btn:focus-visible {
+    outline: 2px solid #10b981;
+    outline-offset: 2px;
+}
+
 .btn-primary {
     background: #10b981;
     color: white;
@@ -169,6 +174,19 @@
     max-width: 95vw;
 }
 
+/* Modal có thể cuộn khi nội dung cao */
+.modal-scrollable {
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-scrollable .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding-right: 5px;
+}
+
 .modal-title {
     font-size: 1.1rem;
     font-weight: 600;
@@ -180,6 +198,14 @@
     justify-content: flex-end;
     gap: 8px;
     margin-top: 20px;
+}
+
+/* Responsive modal trên mobile */
+@media (max-width: 640px) {
+    .modal {
+        max-height: 90vh;
+        overflow-y: auto;
+    }
 }
 
 /* -------------------- FORM -------------------- */

@@ -185,6 +185,32 @@ export const state = {
         { id: '4', name: 'Điều hòa nhiệt độ', icon: '❄️', zone: 'Khu B', mode: 'AUTO', isActive: true, value: 60, autoResetTime: null }
     ],
 
+    recipes: [
+    {
+        id: 'r1',
+        name: 'Công thức Hoa Hồng',
+        flower_type: 'Hoa Hồng',
+        creator_name: 'Kỹ thuật viên A',
+        description: 'Dành cho vụ xuân hè',
+        created_date: '01/03/2025',
+        status: 'active',
+        stages: [
+            {
+                id: 's1',
+                name: 'Giai đoạn ươm',
+                duration: 10,
+                completed: true,
+                currentDay: 10,
+                thresholds: [
+                    { metric_type: 'Nhiệt độ', min_value: 22, max_value: 26 },
+                    { metric_type: 'Độ ẩm đất', min_value: 70, max_value: 85 }
+                ]
+            },
+            // ... các stage khác
+        ]
+    }
+            ],
+
     // -------------------- CẢNH BÁO --------------------
     alerts: [
         {
@@ -301,5 +327,47 @@ export const state = {
             oldValue: 'Khu A - Giàn 1',
             ipAddress: '192.168.1.105'
         }
-    ]
+    ],
+
+    // ===================== AUTH MOCK DATA =====================
+    users: [
+        {
+            id: 'u1',
+            username: 'owner1',
+            password: '123456',
+            email: 'owner@farm.com',
+            phone: '0909123456',
+            role: 'OWNER',
+            status: 'ACTIVE'     // mặc định active cho tài khoản mẫu
+        },
+        {
+            id: 'u2',
+            username: 'tech1',
+            password: '123456',
+            email: 'tech@farm.com',
+            phone: '0909123457',
+            role: 'TECHNICIAN',
+            status: 'ACTIVE'
+        },
+        {
+            id: 'u3',
+            username: 'op1',
+            password: '123456',
+            email: 'operator@farm.com',
+            phone: '0909123458',
+            role: 'OPERATOR',
+            status: 'ACTIVE'
+        },
+        {
+            id: 'u4',
+            username: 'pendingUser',
+            password: '123456',
+            email: 'pending@farm.com',
+            phone: '0909123459',
+            role: 'OPERATOR',
+            status: 'PENDING'
+        }
+    ],
+    currentUser: null
 };
+
