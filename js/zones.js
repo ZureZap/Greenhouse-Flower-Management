@@ -1,10 +1,12 @@
 /**
  * zones.js
  * Quản lý trang Vùng trồng - hiển thị cây phân cấp, thêm, sửa, xóa, tìm kiếm vùng.
+ * Tuân thủ ERD: Zone có greenhouse_id, recipe_id, start_date.
  */
 
 import { state } from './state.js';
 import { showToast, openModal, closeModal } from './app.js';
+import { generateId, getZoneById, escapeHtml, findParentNode } from './utils.js';
 
 // ===================== TIỆN ÍCH =====================
 function zoneIcon(type) {
@@ -31,7 +33,6 @@ function buildTreeHtml(nodes, keyword = '', level = 0) {
         const indent = level * 20;
         const isSelected = state.selectedZone?.id === node.id;
 
-        // Nếu có từ khóa và node không khớp nhưng có con khớp thì vẫn hiển thị node cha
         if (keyword && !node.name.toLowerCase().includes(keyword.toLowerCase()) && hasChildren) {
             const childMatch = filterNodesByName(node.children, keyword).length > 0;
             if (!childMatch) return '';
@@ -76,6 +77,12 @@ function renderZoneTree() {
     treeContainer.innerHTML = html || '<div class="no-result">Không tìm thấy vùng phù hợp</div>';
 }
 
+// ===================== LẤY DANH SÁCH RECIPE =====================
+function getRecipes() {
+    return (state.recipes || []).map(r => ({ id: r.id, name: r.name }));
+}
+
+// ===================== RENDER CHI TIẾT ZONE =====================
 function renderZoneDetail() {
     const container = document.getElementById('zone-detail');
     const zone = state.selectedZone;
@@ -83,6 +90,7 @@ function renderZoneDetail() {
         container.innerHTML = `<div class="empty-detail">🗂️ Chọn một khu vực để xem chi tiết</div>`;
         return;
     }
+
     let html = `
         <div class="detail-header">
             <div class="detail-icon">${zoneIcon(zone.type)}</div>
@@ -96,14 +104,23 @@ function renderZoneDetail() {
             </div>
         </div>
     `;
+
     if (zone.type === 'zone') {
+        // Tìm recipe hiện tại
+        const recipes = getRecipes();
+        const currentRecipe = recipes.find(r => r.id === zone.recipe_id);
         html += `
             <div class="grid grid-2 zone-metrics">
                 <div class="metric-card temp">🌡️ Nhiệt độ: <strong>${zone.temperature}°C</strong></div>
                 <div class="metric-card hum">💧 Độ ẩm: <strong>${zone.humidity}%</strong></div>
             </div>
+            <div style="margin-bottom:12px;">
+                <div><strong>Công thức áp dụng:</strong> ${currentRecipe ? currentRecipe.name : 'Chưa có'}</div>
+                <div><strong>Ngày bắt đầu:</strong> ${zone.start_date || 'Chưa có'}</div>
+            </div>
         `;
     }
+
     if (zone.children?.length) {
         const childTitle = zone.type === 'zone' ? 'Giàn trồng' : 'Khu vực con';
         html += `<div class="subtitle">${childTitle}</div><div class="grid grid-2 zone-children">`;
@@ -151,19 +168,7 @@ function handleDeleteClick(e) {
 }
 
 // ===================== CRUD ZONE =====================
-function findParentZone(nodes, targetId, parent = null) {
-    for (const node of nodes) {
-        if (node.id === targetId) return parent;
-        if (node.children) {
-            const found = findParentZone(node.children, targetId, node);
-            if (found) return found;
-        }
-    }
-    return null;
-}
-
 function deleteZoneById(id) {
-    // Xóa đệ quy
     const removeNode = (nodes, id) => {
         for (let i = 0; i < nodes.length; i++) {
             if (nodes[i].id === id) {
@@ -176,36 +181,22 @@ function deleteZoneById(id) {
     };
     removeNode(state.zones, id);
     if (state.selectedZone?.id === id) state.selectedZone = null;
-    // Xóa trạng thái expand
     delete state.zoneExpanded[id];
     renderZones();
     showToast('Đã xóa vùng', 'info');
 }
 
-function getZoneById(id, nodes = state.zones) {
-    for (const node of nodes) {
-        if (node.id === id) return node;
-        if (node.children) {
-            const found = getZoneById(id, node.children);
-            if (found) return found;
-        }
-    }
-    return null;
-}
-
-function generateId() {
-    return 'zone_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-}
-
 function saveZone(zoneData) {
-    const { id, name, type, parentId, temperature, humidity, status } = zoneData;
+    const { id, name, type, parentId, greenhouse_id, recipe_id, start_date, temperature, humidity, status } = zoneData;
     if (id) {
-        // Sửa zone
         const existing = getZoneById(id);
         if (existing) {
             existing.name = name;
             existing.type = type;
             if (type === 'zone') {
+                existing.greenhouse_id = greenhouse_id;
+                existing.recipe_id = recipe_id;
+                existing.start_date = start_date;
                 existing.temperature = temperature;
                 existing.humidity = humidity;
                 existing.status = status;
@@ -213,12 +204,14 @@ function saveZone(zoneData) {
             showToast('Đã cập nhật vùng');
         }
     } else {
-        // Thêm mới
         const newZone = {
             id: generateId(),
             name,
             type,
             children: [],
+            greenhouse_id: greenhouse_id || null,
+            recipe_id: recipe_id || null,
+            start_date: start_date || null,
         };
         if (type === 'zone') {
             newZone.temperature = temperature || 25;
@@ -228,13 +221,11 @@ function saveZone(zoneData) {
         if (type === 'rack') {
             newZone.devices = 0;
         }
-        // Tìm parent và thêm vào
         const parent = parentId ? getZoneById(parentId) : null;
         if (parent) {
             if (!parent.children) parent.children = [];
             parent.children.push(newZone);
         } else {
-            // Nếu không có parent thì thêm vào root (cấp farm)
             state.zones.push(newZone);
         }
         showToast('Đã thêm vùng mới');
@@ -242,15 +233,31 @@ function saveZone(zoneData) {
     renderZones();
 }
 
+// ===================== MODAL THÊM/SỬA ZONE =====================
 function openZoneModal(editId = null) {
     const zone = editId ? getZoneById(editId) : null;
     const title = zone ? 'Sửa vùng' : 'Thêm vùng mới';
 
-    // Tạo danh sách parent (chỉ các loại có thể chứa con)
+    // Lấy danh sách greenhouse (từ cây) để làm dropdown
+    const greenhouseOptions = [];
+    function collectGreenhouses(nodes) {
+        for (const node of nodes) {
+            if (node.type === 'greenhouse') {
+                greenhouseOptions.push({ id: node.id, name: node.name });
+            }
+            if (node.children) collectGreenhouses(node.children);
+        }
+    }
+    collectGreenhouses(state.zones);
+
+    // Lấy danh sách recipe
+    const recipeOptions = getRecipes();
+
+    // Lấy danh sách parent
     const parentOptions = [];
     function collectParents(nodes, level = 0) {
         for (const node of nodes) {
-            if (node.type !== 'rack') { // rack không thể có con
+            if (node.type !== 'rack') {
                 parentOptions.push({ id: node.id, name: '　'.repeat(level) + node.name });
                 if (node.children) collectParents(node.children, level + 1);
             }
@@ -260,11 +267,11 @@ function openZoneModal(editId = null) {
 
     const modalHtml = `
         <div class="modal-overlay" id="zone-crud-modal">
-            <div class="modal" style="width: 500px;">
+            <div class="modal" style="width: 550px; max-width: 95vw;">
                 <div class="modal-title">${title}</div>
                 <div class="form-group">
                     <label class="form-label">Tên vùng</label>
-                    <input class="form-input" id="zone-name" value="${zone?.name || ''}">
+                    <input class="form-input" id="zone-name" value="${escapeHtml(zone?.name || '')}">
                 </div>
                 <div class="form-group">
                     <label class="form-label">Loại vùng</label>
@@ -279,10 +286,28 @@ function openZoneModal(editId = null) {
                     <label class="form-label">Vùng cha</label>
                     <select class="form-select" id="zone-parent">
                         <option value="">-- Không (gốc) --</option>
-                        ${parentOptions.map(p => `<option value="${p.id}" ${zone && findParentZone(state.zones, zone.id)?.id === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
+                        ${parentOptions.map(p => `<option value="${p.id}" ${zone && findParentNode(state.zones, zone.id)?.id === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
                     </select>
                 </div>
                 <div id="zone-extra-fields" style="display: ${zone?.type === 'zone' ? 'block' : 'none'}">
+                    <div class="form-group">
+                        <label class="form-label">Thuộc nhà kính</label>
+                        <select class="form-select" id="zone-greenhouse">
+                            <option value="">-- Không --</option>
+                            ${greenhouseOptions.map(gh => `<option value="${gh.id}" ${zone?.greenhouse_id === gh.id ? 'selected' : ''}>${gh.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Công thức áp dụng</label>
+                        <select class="form-select" id="zone-recipe">
+                            <option value="">-- Không --</option>
+                            ${recipeOptions.map(r => `<option value="${r.id}" ${zone?.recipe_id === r.id ? 'selected' : ''}>${r.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Ngày bắt đầu</label>
+                        <input class="form-input" type="date" id="zone-start-date" value="${zone?.start_date || ''}">
+                    </div>
                     <div class="form-group">
                         <label class="form-label">Nhiệt độ (°C)</label>
                         <input class="form-input" id="zone-temp" type="number" step="0.1" value="${zone?.temperature || 25}">
@@ -311,14 +336,12 @@ function openZoneModal(editId = null) {
     const modal = document.getElementById('zone-crud-modal');
     openModal('zone-crud-modal');
 
-    // Hiển thị thêm trường khi chọn loại zone
     const typeSelect = document.getElementById('zone-type');
     const extraDiv = document.getElementById('zone-extra-fields');
     typeSelect.addEventListener('change', () => {
         extraDiv.style.display = typeSelect.value === 'zone' ? 'block' : 'none';
     });
 
-    // Xử lý lưu
     const saveBtn = document.getElementById('save-crud');
     const cancelBtn = document.getElementById('cancel-crud');
     const saveHandler = () => {
@@ -336,6 +359,9 @@ function openZoneModal(editId = null) {
             parentId,
         };
         if (type === 'zone') {
+            zoneData.greenhouse_id = document.getElementById('zone-greenhouse').value || null;
+            zoneData.recipe_id = document.getElementById('zone-recipe').value || null;
+            zoneData.start_date = document.getElementById('zone-start-date').value || null;
             zoneData.temperature = parseFloat(document.getElementById('zone-temp').value);
             zoneData.humidity = parseInt(document.getElementById('zone-hum').value);
             zoneData.status = document.getElementById('zone-status').value;
@@ -381,12 +407,9 @@ export function renderZonesPage() {
     `;
 
     renderZones();
-    // Sự kiện tìm kiếm
     const searchInput = document.getElementById('zone-search');
     searchInput.addEventListener('input', () => renderZoneTree());
-    // Thêm vùng
     document.getElementById('add-zone-btn').addEventListener('click', () => openZoneModal());
-    // Sự kiện trên cây (expand, select)
     document.getElementById('zone-tree')?.addEventListener('click', (e) => {
         const toggle = e.target.closest('.tree-toggle');
         if (toggle) {
@@ -402,11 +425,10 @@ export function renderZonesPage() {
     });
 }
 
-// Các hàm xuất khẩu và global
 export function toggleZoneExpand(id) {
     state.zoneExpanded[id] = !state.zoneExpanded[id];
     renderZoneTree();
-    renderZoneDetail(); // giữ nguyên detail nếu cần
+    renderZoneDetail();
 }
 
 export function selectZone(id) {
@@ -415,6 +437,5 @@ export function selectZone(id) {
     renderZoneDetail();
 }
 
-// Gán global để dùng nếu cần inline (nhưng đã dùng event delegation)
 window.toggleZoneExpand = toggleZoneExpand;
 window.selectZone = selectZone;

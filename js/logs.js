@@ -5,6 +5,7 @@
  */
 
 import { state } from './state.js';
+import { escapeHtml } from './utils.js';
 
 // ===================== HÀM RENDER DỮ LIỆU =====================
 
@@ -61,34 +62,38 @@ export function renderLogs() {
     // --- Render bảng log ---
     const tableBody = document.getElementById('log-table');
     if (tableBody) {
+        if (filteredLogs.length === 0) {
+            tableBody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#6b7280;">Không có bản ghi nào phù hợp.</td></tr>`;
+            return;
+        }
         tableBody.innerHTML = filteredLogs.map(log => `
             <tr>
                 <!-- Thời gian -->
-                <td style="font-size:0.82rem">${log.timestamp.toLocaleString('vi-VN')}</td>
+                <td style="font-size:0.82rem">${new Date(log.timestamp).toLocaleString('vi-VN')}</td>
                 
                 <!-- Người dùng (tên + ID) -->
                 <td>
-                    <div style="font-weight:500">${log.userName}</div>
-                    <div style="font-size:0.75rem;color:#9ca3af">${log.userId}</div>
+                    <div style="font-weight:500">${escapeHtml(log.userName)}</div>
+                    <div style="font-size:0.75rem;color:#9ca3af">${escapeHtml(log.userId)}</div>
                 </td>
                 
                 <!-- Vai trò -->
-                <td><span class="chip ${roleMap[log.userRole] || 'chip-default'}">${log.userRole}</span></td>
+                <td><span class="chip ${roleMap[log.userRole] || 'chip-default'}">${escapeHtml(log.userRole)}</span></td>
                 
                 <!-- Hành động (chip) -->
                 <td><span class="chip ${(actionMap[log.action] || ['chip-default', ''])[0]}">${(actionMap[log.action] || ['', log.action])[1]}</span></td>
                 
                 <!-- Tài nguyên -->
-                <td style="font-size:0.82rem;max-width:200px">${log.resource}</td>
+                <td style="font-size:0.82rem;max-width:200px">${escapeHtml(log.resource)}</td>
                 
                 <!-- Giá trị cũ -->
-                <td><span style="font-size:0.82rem;color:#9ca3af;text-decoration:line-through">${log.oldValue || '-'}</span></td>
+                <td><span style="font-size:0.82rem;color:#9ca3af;text-decoration:line-through">${escapeHtml(log.oldValue || '-')}</span></td>
                 
                 <!-- Giá trị mới -->
-                <td><span style="font-size:0.82rem;color:#10b981;font-weight:500">${log.newValue || '-'}</span></td>
+                <td><span style="font-size:0.82rem;color:#10b981;font-weight:500">${escapeHtml(log.newValue || '-')}</span></td>
                 
                 <!-- IP Address (mono font) -->
-                <td><span class="mono">${log.ipAddress}</span></td>
+                <td><span class="mono">${escapeHtml(log.ipAddress)}</span></td>
             </tr>
         `).join('');
     }

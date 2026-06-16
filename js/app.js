@@ -1,3 +1,9 @@
+/**
+ * app.js
+ * Ứng dụng chính - điều phối các trang, xử lý điều hướng, modal, xác thực,
+ * và hiển thị icon chuông phê duyệt cho OWNER.
+ */
+
 import { state } from './state.js';
 import { renderDashboardPage } from './dashboard.js';
 import { renderDevicesPage } from './devices.js';
@@ -10,6 +16,8 @@ import { renderLoginPage } from './pages/login.js';
 import { renderRegisterPage } from './pages/register.js';
 import { renderUserApprovalPage } from './pages/userApproval.js';
 import { isLoggedIn, logout, getCurrentUser } from './auth.js';
+
+// ===================== TIỆN ÍCH CHUNG =====================
 
 export function showToast(msg, type = 'success') {
     const container = document.getElementById('toast-container');
@@ -30,7 +38,8 @@ export function closeModal(id) {
     if (modal) modal.classList.remove('open');
 }
 
-// ===================== ROUTING =====================
+// ===================== ĐIỀU HƯỚNG =====================
+
 let isAuth = false;
 
 function renderPage(pageName) {
@@ -77,6 +86,8 @@ function handleRoute() {
     renderPage(hash);
 }
 
+// ===================== THÀNH PHẦN SIDEBAR =====================
+
 function addLogoutButton() {
     const nav = document.querySelector('.sidebar-nav');
     if (!nav || document.getElementById('logout-item')) return;
@@ -92,6 +103,9 @@ function addLogoutButton() {
         window.location.hash = 'login';
         window.dispatchEvent(new Event('auth-changed'));
         document.getElementById('sidebar').style.display = 'none';
+        // Xóa icon chuông khi logout
+        const bell = document.getElementById('bell-container');
+        if (bell) bell.remove();
     });
     nav.appendChild(logoutBtn);
 }
@@ -105,7 +119,7 @@ function addOwnerMenu() {
         approvalItem.id = 'owner-approval-item';
         approvalItem.className = 'nav-item';
         approvalItem.href = '#';
-        approvalItem.innerHTML = '<span class="nav-icon">✅</span> Phê duyệt tài khoản';
+        approvalItem.innerHTML = '<span class="nav-icon">📋</span> Danh sách tài khoản';
         approvalItem.addEventListener('click', (e) => {
             e.preventDefault();
             window.location.hash = 'user-approval';
@@ -128,17 +142,20 @@ function toggleSidebar() {
     }
 }
 
-// Khởi tạo
+// ===================== KHỞI TẠO =====================
+
 isAuth = isLoggedIn();
 toggleSidebar();
 
 window.addEventListener('hashchange', () => handleRoute());
+
 window.addEventListener('auth-changed', () => {
     isAuth = isLoggedIn();
     toggleSidebar();
     handleRoute();
 });
 
+// Sự kiện click menu
 document.querySelectorAll('.nav-item').forEach(menuItem => {
     menuItem.addEventListener('click', (e) => {
         if (!isAuth) return;
@@ -148,6 +165,7 @@ document.querySelectorAll('.nav-item').forEach(menuItem => {
     });
 });
 
+// Đóng modal khi click overlay
 document.body.addEventListener('click', (e) => {
     if (e.target.classList?.contains('modal-overlay')) {
         e.target.classList.remove('open');
@@ -157,4 +175,5 @@ document.body.addEventListener('click', (e) => {
 window.closeModal = closeModal;
 window.openModal = openModal;
 
+// Khởi chạy route đầu tiên
 handleRoute();

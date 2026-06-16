@@ -1,11 +1,35 @@
 /**
  * devices.js
  * Quản lý trang Thiết bị IoT - thêm, sửa, xóa, phê duyệt, menu dropdown (⋯)
- * Hỗ trợ nhập MAC thủ công, auto-format, validation và kiểm tra trùng lặp.
+ * Hỗ trợ nhập MAC thủ công, auto-format, validation, kiểm tra trùng lặp,
+ * và lọc theo greenhouse (qua zone_id).
+ * Tuân thủ ERD: device có gateway_id, zone_id, device_type, metric_type,
+ * và controlProperties cho OUTPUT_DEVICE.
  */
 
 import { state } from './state.js';
 import { showToast, openModal, closeModal } from './app.js';
+import {
+    getGreenhouses,
+    getGreenhouseIdByZoneId,
+    getZoneOptions,
+    getZoneName,
+    findParentNode
+} from './utils.js';
+
+// ===================== BIẾN TOÀN CỤC =====================
+let filterGreenhouseId = null;
+let currentMenu = null;
+
+// ===================== HÀM LẤY GATEWAY =====================
+function getGatewayOptions() {
+    return state.gateways.map(g => ({ id: g.id, name: g.name }));
+}
+
+function getGatewayName(gatewayId) {
+    const gw = state.gateways.find(g => g.id === gatewayId);
+    return gw ? gw.name : gatewayId;
+}
 
 // ===================== TIỆN ÍCH HIỂN THỊ =====================
 function deviceStatusChip(status) {
@@ -74,18 +98,50 @@ function macFormatHandler(e) {
     validateMacInput();
 }
 
+// ===================== XỬ LÝ CONTROL PROPERTIES =====================
+function createControlProperty(deviceId) {
+    if (!state.controlProperties) state.controlProperties = [];
+    if (!state.controlProperties.find(cp => cp.device_id === deviceId)) {
+        state.controlProperties.push({
+            device_id: deviceId,
+            mode: 'AUTO',
+            isActive: false,
+            value: 0,
+            autoResetTime: null
+        });
+    }
+}
+
+function deleteControlProperty(deviceId) {
+    if (state.controlProperties) {
+        state.controlProperties = state.controlProperties.filter(cp => cp.device_id !== deviceId);
+    }
+}
+
 // ===================== RENDER TOÀN BỘ TRANG =====================
 export function renderDevicesPage() {
     const container = document.getElementById('page-devices');
     if (!container) return;
 
+    const greenhouses = getGreenhouses();
+    const gateways = getGatewayOptions();
+
     container.innerHTML = `
-        <div class="page-header">
+        <div class="page-header" style="position: relative;">
             <div>
                 <div class="page-title">Quản lý Thiết bị IoT</div>
                 <div class="page-sub">Theo dõi vòng đời và sức khỏe thiết bị cảm biến</div>
             </div>
-            <button class="btn btn-primary" onclick="window.showAddDeviceModal()">➕ Thêm thiết bị</button>
+            <div style="position: absolute; top: 0; right: 0; display: flex; gap: 12px; align-items: center;">
+                <div>
+                    <label style="font-size:0.85rem; color:#6b7280; margin-right:6px;">🏠 Nhà kính:</label>
+                    <select id="greenhouse-filter" class="form-select" style="width:auto; display:inline-block;">
+                        <option value="">-- Tất cả --</option>
+                        ${greenhouses.map(gh => `<option value="${gh.id}">${gh.name}</option>`).join('')}
+                    </select>
+                </div>
+                <button class="btn btn-primary" onclick="window.showAddDeviceModal()">➕ Thêm thiết bị</button>
+            </div>
         </div>
         <div class="grid grid-4" id="device-stats" style="margin-bottom:20px"></div>
         <div class="card">
@@ -94,8 +150,15 @@ export function renderDevicesPage() {
                 <table>
                     <thead>
                         <tr>
-                            <th>Tên thiết bị</th><th>Loại</th><th>MAC Address</th>
-                            <th>Khu vực</th><th>Trạng thái</th><th>Pin</th><th>Heartbeat cuối</th><th>Thao tác</th>
+                            <th>Tên thiết bị</th>
+                            <th>Loại</th>
+                            <th>Metric</th>
+                            <th>Gateway</th>
+                            <th>Khu vực</th>
+                            <th>Trạng thái</th>
+                            <th>Pin</th>
+                            <th>Heartbeat cuối</th>
+                            <th>Thao tác</th>
                         </tr>
                     </thead>
                     <tbody id="device-table"></tbody>
@@ -114,6 +177,13 @@ export function renderDevicesPage() {
                 <div class="form-group">
                     <label class="form-label">Loại thiết bị</label>
                     <select class="form-select" id="dev-type">
+                        <option value="SENSOR">Cảm biến (SENSOR)</option>
+                        <option value="OUTPUT_DEVICE">Thiết bị đầu ra (OUTPUT_DEVICE)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Loại dữ liệu (Metric)</label>
+                    <select class="form-select" id="dev-metric">
                         <option value="Temperature">Nhiệt độ</option>
                         <option value="Humidity">Độ ẩm</option>
                         <option value="Light">Ánh sáng</option>
@@ -122,12 +192,15 @@ export function renderDevicesPage() {
                     </select>
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Gateway</label>
+                    <select class="form-select" id="dev-gateway">
+                        ${gateways.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
                     <label class="form-label">Gán vào khu vực</label>
                     <select class="form-select" id="dev-zone">
-                        <option value="Khu A - Giàn 1">Khu A - Giàn 1</option>
-                        <option value="Khu A - Giàn 2">Khu A - Giàn 2</option>
-                        <option value="Khu B - Giàn 1">Khu B - Giàn 1</option>
-                        <option value="Khu B - Giàn 2">Khu B - Giàn 2</option>
+                        <!-- Sẽ được populate động khi mở modal -->
                     </select>
                 </div>
                 <div class="form-group">
@@ -143,6 +216,13 @@ export function renderDevicesPage() {
         </div>
     `;
 
+    // Sự kiện lọc greenhouse
+    const filterSelect = document.getElementById('greenhouse-filter');
+    filterSelect.addEventListener('change', (e) => {
+        filterGreenhouseId = e.target.value || null;
+        renderDevices();
+    });
+
     renderDevices();
     attachGlobalEvents();
 }
@@ -151,13 +231,22 @@ export function renderDevicesPage() {
 export function renderDevices() {
     const devices = state.devices;
 
+    // Lọc theo greenhouse
+    let filteredDevices = devices;
+    if (filterGreenhouseId) {
+        filteredDevices = devices.filter(d => {
+            const ghId = getGreenhouseIdByZoneId(d.zone_id);
+            return ghId === filterGreenhouseId;
+        });
+    }
+
     // Cập nhật 4 card thống kê
     const statsContainer = document.getElementById('device-stats');
     if (statsContainer) {
-        const total = devices.length;
-        const active = devices.filter(d => d.status === 'ACTIVE').length;
-        const offline = devices.filter(d => d.status === 'OFFLINE').length;
-        const replace = devices.filter(d => d.status === 'NEEDS_REPLACEMENT').length;
+        const total = filteredDevices.length;
+        const active = filteredDevices.filter(d => d.status === 'ACTIVE').length;
+        const offline = filteredDevices.filter(d => d.status === 'OFFLINE').length;
+        const replace = filteredDevices.filter(d => d.status === 'NEEDS_REPLACEMENT').length;
         const stats = [
             { label: 'Tổng thiết bị', value: total, color: '#3b82f6' },
             { label: 'Đang hoạt động', value: active, color: '#10b981' },
@@ -177,12 +266,19 @@ export function renderDevices() {
     // Cập nhật bảng danh sách thiết bị
     const tableBody = document.getElementById('device-table');
     if (tableBody) {
-        tableBody.innerHTML = devices.map(device => `
+        if (filteredDevices.length === 0) {
+            tableBody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:#6b7280;">
+                ${filterGreenhouseId ? 'Không có thiết bị nào trong nhà kính này.' : 'Chưa có thiết bị.'}
+            </td></tr>`;
+            return;
+        }
+        tableBody.innerHTML = filteredDevices.map(device => `
             <tr>
                 <td>${device.name}</td>
-                <td>${device.type}</td>
-                <td><span class="mono">${device.macAddress}</span></td>
-                <td>${device.zone || '-'}</td>
+                <td>${device.device_type}</td>
+                <td>${device.metric_type}</td>
+                <td>${getGatewayName(device.gateway_id)}</td>
+                <td>${getZoneName(device.zone_id)}</td>
                 <td>${deviceStatusChip(device.status)}</td>
                 <td>${batteryChip(device.batteryLevel)}</td>
                 <td style="font-size:0.85rem">${device.lastHeartbeat.toLocaleTimeString('vi-VN')}</td>
@@ -198,8 +294,6 @@ export function renderDevices() {
 }
 
 // ===================== MENU DROPDOWN =====================
-let currentMenu = null;
-
 function showActionMenu(deviceId, buttonElement) {
     if (currentMenu) currentMenu.remove();
     const menu = document.createElement('div');
@@ -262,13 +356,35 @@ function globalClickHandler(e) {
 }
 
 // ===================== XỬ LÝ CRUD =====================
+function populateZoneSelect(selectedZoneId = '') {
+    const select = document.getElementById('dev-zone');
+    if (!select) return;
+    const zones = getZoneOptions(filterGreenhouseId);
+    select.innerHTML = `<option value="">-- Không --</option>`;
+    zones.forEach(z => {
+        const option = document.createElement('option');
+        option.value = z.id;
+        option.textContent = z.name;
+        if (z.id === selectedZoneId) option.selected = true;
+        select.appendChild(option);
+    });
+    if (filterGreenhouseId && zones.length === 0) {
+        const info = document.createElement('option');
+        info.textContent = '⚠ Không có zone trong nhà kính này';
+        info.disabled = true;
+        select.appendChild(info);
+    }
+}
+
 export function openDeviceApproval(id) {
     const device = state.devices.find(d => d.id === id);
     if (!device) return;
     state.pendingDeviceId = id;
     document.getElementById('dev-name').value = device.name;
-    document.getElementById('dev-type').value = device.type;
-    document.getElementById('dev-zone').value = device.zone || 'Khu A - Giàn 1';
+    document.getElementById('dev-type').value = device.device_type;
+    document.getElementById('dev-metric').value = device.metric_type;
+    document.getElementById('dev-gateway').value = device.gateway_id;
+    populateZoneSelect(device.zone_id);
     document.getElementById('dev-mac').value = device.macAddress;
     document.getElementById('device-modal-title').innerText = 'Phê duyệt thiết bị';
     window._addingNew = false;
@@ -279,9 +395,11 @@ export function openDeviceApproval(id) {
 
 export function showAddDeviceModal() {
     document.getElementById('dev-name').value = '';
-    document.getElementById('dev-type').value = 'Temperature';
-    document.getElementById('dev-zone').value = 'Khu A - Giàn 1';
-    document.getElementById('dev-mac').value = '';           // để trống, người dùng tự nhập
+    document.getElementById('dev-type').value = 'SENSOR';
+    document.getElementById('dev-metric').value = 'Temperature';
+    document.getElementById('dev-gateway').value = state.gateways[0]?.id || '';
+    populateZoneSelect();
+    document.getElementById('dev-mac').value = '';
     document.getElementById('mac-error').style.display = 'none';
     document.getElementById('device-modal-title').innerText = 'Thêm thiết bị mới';
     window._addingNew = true;
@@ -294,8 +412,10 @@ export function editDevice(id) {
     const device = state.devices.find(d => d.id === id);
     if (!device) return;
     document.getElementById('dev-name').value = device.name;
-    document.getElementById('dev-type').value = device.type;
-    document.getElementById('dev-zone').value = device.zone || 'Khu A - Giàn 1';
+    document.getElementById('dev-type').value = device.device_type;
+    document.getElementById('dev-metric').value = device.metric_type;
+    document.getElementById('dev-gateway').value = device.gateway_id;
+    populateZoneSelect(device.zone_id);
     document.getElementById('dev-mac').value = device.macAddress;
     document.getElementById('device-modal-title').innerText = 'Chỉnh sửa thiết bị';
     window._addingNew = false;
@@ -306,6 +426,7 @@ export function editDevice(id) {
 
 export function deleteDevice(id) {
     if (confirm('Bạn có chắc chắn muốn xóa thiết bị này?')) {
+        deleteControlProperty(id);
         state.devices = state.devices.filter(d => d.id !== id);
         renderDevices();
         showToast('Đã xóa thiết bị', 'info');
@@ -314,57 +435,83 @@ export function deleteDevice(id) {
 
 export function approveDevice() {
     const name = document.getElementById('dev-name').value;
-    const type = document.getElementById('dev-type').value;
-    const zone = document.getElementById('dev-zone').value;
+    const deviceType = document.getElementById('dev-type').value;
+    const metricType = document.getElementById('dev-metric').value;
+    const gatewayId = document.getElementById('dev-gateway').value;
+    const zoneId = document.getElementById('dev-zone').value;
     let mac = document.getElementById('dev-mac').value;
 
-    // Kiểm tra MAC hợp lệ
     if (!validateMacInput()) {
         showToast('MAC address không đúng định dạng', 'warning');
         return;
     }
-    // Kiểm tra trùng lặp (bỏ qua chính thiết bị đang sửa)
     const excludeId = window._editingDeviceId || null;
     if (isMacExists(mac, excludeId)) {
         showToast('MAC address đã tồn tại trong hệ thống', 'warning');
         return;
     }
+    if (!gatewayId) {
+        showToast('Vui lòng chọn Gateway', 'warning');
+        return;
+    }
+    if (!zoneId) {
+        showToast('Vui lòng chọn khu vực', 'warning');
+        return;
+    }
 
     if (window._editingDeviceId) {
-        // Chế độ sửa
         const device = state.devices.find(d => d.id === window._editingDeviceId);
         if (device) {
+            const oldType = device.device_type;
             device.name = name;
-            device.type = type;
-            device.zone = zone;
+            device.device_type = deviceType;
+            device.metric_type = metricType;
+            device.gateway_id = gatewayId;
+            device.zone_id = zoneId;
             device.macAddress = mac;
+            if (deviceType === 'OUTPUT_DEVICE' && oldType !== 'OUTPUT_DEVICE') {
+                createControlProperty(device.id);
+            } else if (oldType === 'OUTPUT_DEVICE' && deviceType !== 'OUTPUT_DEVICE') {
+                deleteControlProperty(device.id);
+            }
             showToast('Đã cập nhật thiết bị');
         }
         window._editingDeviceId = null;
     } else if (window._addingNew) {
-        // Thêm mới
         const newDevice = {
             id: Date.now().toString(),
             name,
-            type,
+            device_type: deviceType,
+            metric_type: metricType,
+            gateway_id: gatewayId,
+            zone_id: zoneId,
             macAddress: mac,
-            zone,
             status: 'ACTIVE',
             lastHeartbeat: new Date(),
-            batteryLevel: type !== 'Actuator' ? 100 : undefined
+            batteryLevel: deviceType !== 'OUTPUT_DEVICE' ? 100 : undefined
         };
         state.devices.push(newDevice);
+        if (deviceType === 'OUTPUT_DEVICE') {
+            createControlProperty(newDevice.id);
+        }
         showToast('Đã thêm thiết bị mới');
         window._addingNew = false;
     } else {
-        // Phê duyệt
         const id = state.pendingDeviceId;
         const device = state.devices.find(d => d.id === id);
         if (device) {
+            const oldType = device.device_type;
             device.name = name;
-            device.type = type;
-            device.zone = zone;
+            device.device_type = deviceType;
+            device.metric_type = metricType;
+            device.gateway_id = gatewayId;
+            device.zone_id = zoneId;
             device.status = 'ACTIVE';
+            if (deviceType === 'OUTPUT_DEVICE' && oldType !== 'OUTPUT_DEVICE') {
+                createControlProperty(device.id);
+            } else if (oldType === 'OUTPUT_DEVICE' && deviceType !== 'OUTPUT_DEVICE') {
+                deleteControlProperty(device.id);
+            }
             showToast('Thiết bị đã được phê duyệt');
         }
     }

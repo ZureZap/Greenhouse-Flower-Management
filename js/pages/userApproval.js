@@ -1,7 +1,104 @@
 import { state } from '../state.js';
 import { approveUser, rejectUser, getCurrentUser } from '../auth.js';
-import { showToast } from '../app.js';
+import { showToast, openModal, closeModal } from '../app.js';
 
+// ===================== CẬP NHẬT BADGE =====================
+function updatePageBellBadge() {
+    const badge = document.getElementById('bell-badge-page');
+    if (!badge) return;
+    const pendingCount = state.users.filter(u => u.status === 'PENDING').length;
+    badge.textContent = pendingCount;
+    badge.style.display = pendingCount > 0 ? 'inline' : 'none';
+}
+
+// ===================== POP-UP DANH SÁCH PENDING =====================
+function showPendingPopup() {
+    const pendingUsers = state.users.filter(u => u.status === 'PENDING');
+    if (pendingUsers.length === 0) {
+        showToast('Không có tài khoản nào chờ phê duyệt', 'info');
+        return;
+    }
+
+    let listHtml = pendingUsers.map(user => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f0f0f0;">
+            <div>
+                <div style="font-weight:600;">${user.username}</div>
+                <div style="font-size:0.8rem; color:#6b7280;">${user.email} - ${user.phone}</div>
+                <div style="font-size:0.75rem; color:#6b7280;">Vai trò: ${user.role}</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+                <button class="btn btn-success btn-sm popup-approve" data-id="${user.id}">✔</button>
+                <button class="btn btn-error btn-sm popup-reject" data-id="${user.id}">✖</button>
+            </div>
+        </div>
+    `).join('');
+
+    const modalHtml = `
+        <div class="modal-overlay" id="pending-popup">
+            <div class="modal" style="width:500px; max-width:90vw;">
+                <div class="modal-title">🔔 Tài khoản chờ phê duyệt</div>
+                <div style="max-height:400px; overflow-y:auto;">
+                    ${listHtml}
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-outline" id="close-pending-popup">Đóng</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    openModal('pending-popup');
+
+    document.querySelectorAll('.popup-approve').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            approveUser(id);
+            showToast('Đã phê duyệt', 'success');
+            closeModal('pending-popup');
+            document.getElementById('pending-popup').remove();
+            updatePageBellBadge();
+            if (document.getElementById('page-user-approval')?.classList?.contains('active')) {
+                renderUserApprovalPage();
+            }
+            if (state.users.some(u => u.status === 'PENDING')) {
+                showPendingPopup();
+            }
+        });
+    });
+
+    document.querySelectorAll('.popup-reject').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            if (confirm('Từ chối sẽ xóa tài khoản này. Bạn chắc chắn?')) {
+                rejectUser(id);
+                showToast('Đã từ chối', 'info');
+                closeModal('pending-popup');
+                document.getElementById('pending-popup').remove();
+                updatePageBellBadge();
+                if (document.getElementById('page-user-approval')?.classList?.contains('active')) {
+                    renderUserApprovalPage();
+                }
+                if (state.users.some(u => u.status === 'PENDING')) {
+                    showPendingPopup();
+                }
+            }
+        });
+    });
+
+    document.getElementById('close-pending-popup').addEventListener('click', () => {
+        closeModal('pending-popup');
+        document.getElementById('pending-popup').remove();
+    });
+
+    document.getElementById('pending-popup').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) {
+            closeModal('pending-popup');
+            document.getElementById('pending-popup').remove();
+        }
+    });
+}
+
+// ===================== TRANG QUẢN LÝ TÀI KHOẢN =====================
 export function renderUserApprovalPage() {
     const container = document.getElementById('page-user-approval');
     if (!container) return;
@@ -10,40 +107,80 @@ export function renderUserApprovalPage() {
         container.innerHTML = '<div class="card" style="padding:20px; text-align:center;">Bạn không có quyền truy cập trang này.</div>';
         return;
     }
-    const pendingUsers = state.users.filter(u => u.status === 'PENDING');
-    if (pendingUsers.length === 0) {
-        container.innerHTML = '<div class="card" style="padding:20px; text-align:center;">Hiện không có tài khoản nào chờ phê duyệt.</div>';
-        return;
+    const pendingCount = state.users.filter(u => u.status === 'PENDING').length;
+    // Chỉ lấy user đã ACTIVE
+    const activeUsers = state.users.filter(u => u.status === 'ACTIVE');
+    activeUsers.sort((a, b) => a.username.localeCompare(b.username));
+
+    let html = `
+        <div class="page-header" style="position: relative;">
+            <div>
+                <div class="page-title">Quản lý tài khoản</div>
+                <div class="page-sub">Danh sách người dùng đã được phê duyệt</div>
+            </div>
+            <div style="position: absolute; top: 0; right: 0; display: flex; align-items: center;">
+                <div id="bell-container-page" style="cursor:pointer; display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:8px; background:#f3f4f6; transition:background 0.15s;" onclick="window.showPendingPopup()">
+                    <span style="font-size:24px;">🔔</span>
+                    <span id="bell-badge-page" style="background:#ef4444; color:white; border-radius:50%; padding:2px 8px; font-size:0.75rem; font-weight:600; display:${pendingCount > 0 ? 'inline' : 'none'};">${pendingCount}</span>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tên đăng nhập</th>
+                            <th>Email</th>
+                            <th>Số điện thoại</th>
+                            <th>Vai trò</th>
+                            <th>Trạng thái</th>
+                            <th>Hành động</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+    `;
+    if (activeUsers.length === 0) {
+        html += `<tr><td colspan="6" style="text-align:center; color:#6b7280;">Chưa có tài khoản nào được phê duyệt.</td></tr>`;
+    } else {
+        activeUsers.forEach(user => {
+            const roleOptions = ['OPERATOR', 'TECHNICIAN', 'OWNER'];
+            const roleLabels = {
+                OPERATOR: 'Nhân viên vận hành',
+                TECHNICIAN: 'Kỹ thuật viên',
+                OWNER: 'Chủ trang trại'
+            };
+            html += `<tr>
+                        <td>${user.username}</td>
+                        <td>${user.email}</td>
+                        <td>${user.phone}</td>
+                        <td>
+                            <select class="form-select role-select" data-id="${user.id}" style="width:auto; display:inline-block;">
+                                ${roleOptions.map(r => `<option value="${r}" ${user.role === r ? 'selected' : ''}>${roleLabels[r]}</option>`).join('')}
+                            </select>
+                        </td>
+                        <td><span class="chip chip-success">Đã kích hoạt</span></td>
+                        <td><span style="color:#6b7280;">Đã kích hoạt</span></td>
+                     </tr>`;
+        });
     }
-    let html = `<div class="page-header"><div><div class="page-title">Phê duyệt tài khoản</div><div class="page-sub">Danh sách người dùng đang chờ kích hoạt</div></div></div>
-                <div class="card"><div class="table-wrap"><table><thead><tr><th>Tên đăng nhập</th><th>Email</th><th>Số điện thoại</th><th>Vai trò</th><th>Thao tác</th></tr></thead><tbody>`;
-    pendingUsers.forEach(user => {
-        html += `<tr>
-                    <td>${user.username}</td>
-                    <td>${user.email}</td>
-                    <td>${user.phone}</td>
-                    <td>${user.role}</td>
-                    <td><button class="btn btn-success btn-sm approve-btn" data-id="${user.id}">✔ Phê duyệt</button>
-                        <button class="btn btn-error btn-sm reject-btn" data-id="${user.id}">✖ Từ chối</button></td>
-                 </tr>`;
-    });
     html += `</tbody></table></div></div>`;
     container.innerHTML = html;
 
-    document.querySelectorAll('.approve-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            approveUser(btn.getAttribute('data-id'));
-            showToast('Đã phê duyệt tài khoản', 'success');
-            renderUserApprovalPage();
-        });
-    });
-    document.querySelectorAll('.reject-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            if (confirm('Từ chối sẽ xóa tài khoản này. Bạn chắc chắn?')) {
-                rejectUser(btn.getAttribute('data-id'));
-                showToast('Đã từ chối và xóa tài khoản', 'info');
-                renderUserApprovalPage();
+    window.showPendingPopup = showPendingPopup;
+
+    // Sự kiện đổi role
+    document.querySelectorAll('.role-select').forEach(select => {
+        select.addEventListener('change', (e) => {
+            const userId = e.target.dataset.id;
+            const newRole = e.target.value;
+            const user = state.users.find(u => u.id === userId);
+            if (user) {
+                user.role = newRole;
+                showToast(`Đã cập nhật role cho ${user.username}`, 'success');
             }
         });
     });
+
+    updatePageBellBadge();
 }
