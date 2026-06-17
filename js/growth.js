@@ -3,19 +3,26 @@
  * Quản lý Công thức sinh trưởng (Recipe), Giai đoạn (GrowthStage), Ngưỡng (Threshold).
  * Tuân theo ERD: Recipe (1) -> GrowthStage (N) -> Threshold (N)
  * Hỗ trợ: thêm, sửa, xóa, điều chỉnh chu kỳ (kéo dài stage).
+ * Sử dụng API backend thay vì state.js.
  */
 
-import { state } from './state.js';
 import { showToast, openModal, closeModal } from './app.js';
 import { generateId, escapeHtml } from './utils.js';
+import {
+    getRecipes,
+    createRecipe,
+    updateRecipe,
+    deleteRecipe,
+    getStages,
+    getThresholds
+} from './api.js';
+
+// ===================== BIẾN TOÀN CỤC =====================
+let recipes = [];
+let growthAdjustId = null;  // thay vì state.growthAdjustId
 
 // ===================== HÀM TIỆN ÍCH TÍNH TOÁN =====================
 
-/**
- * Tính phần trăm tiến độ của công thức
- * @param {Object} recipe - Công thức
- * @returns {number} Phần trăm (0-100)
- */
 function calcProgress(recipe) {
     const total = recipe.stages.reduce((s, st) => s + (st.end_day - st.start_day + 1), 0);
     const done = recipe.stages.reduce((s, st) => {
@@ -26,11 +33,6 @@ function calcProgress(recipe) {
     return total > 0 ? Math.round((done / total) * 100) : 0;
 }
 
-/**
- * Tính số ngày còn lại của công thức
- * @param {Object} recipe - Công thức
- * @returns {number} Số ngày còn lại
- */
 function daysLeft(recipe) {
     const total = recipe.stages.reduce((s, st) => s + (st.end_day - st.start_day + 1), 0);
     const done = recipe.stages.reduce((s, st) => {
@@ -41,13 +43,32 @@ function daysLeft(recipe) {
     return total - done;
 }
 
+// ===================== LOAD DỮ LIỆU =====================
+async function loadRecipes() {
+    try {
+        recipes = await getRecipes();
+        // Lấy stages và thresholds cho từng recipe
+        for (let recipe of recipes) {
+            const stages = await getStages(recipe.id);
+            for (let stage of stages) {
+                const thresholds = await getThresholds(stage.id);
+                stage.thresholds = thresholds;
+            }
+            recipe.stages = stages;
+        }
+        return recipes;
+    } catch (err) {
+        showToast('Lỗi tải công thức: ' + err.message, 'error');
+        throw err;
+    }
+}
+
 // ===================== RENDER DANH SÁCH =====================
 
-export function renderGrowth() {
+export async function renderGrowth() {
     const container = document.getElementById('growth-list');
     if (!container) return;
 
-    const recipes = state.recipes || [];
     if (recipes.length === 0) {
         container.innerHTML = '<div class="card" style="padding:20px; text-align:center;">Chưa có công thức nào. Hãy tạo mới.</div>';
         return;
@@ -136,17 +157,22 @@ export function renderGrowth() {
 }
 
 // ===================== XÓA CÔNG THỨC =====================
-function deleteRecipe(id) {
+async function deleteRecipe(id) {
     if (confirm('Bạn có chắc chắn muốn xóa công thức này?')) {
-        state.recipes = state.recipes.filter(r => r.id !== id);
-        renderGrowth();
-        showToast('Đã xóa công thức', 'info');
+        try {
+            await deleteRecipe(id);
+            recipes = recipes.filter(r => r.id !== id);
+            await renderGrowth();
+            showToast('Đã xóa công thức', 'info');
+        } catch (err) {
+            showToast('Lỗi xóa công thức: ' + err.message, 'error');
+        }
     }
 }
 
 // ===================== SỬA CÔNG THỨC =====================
 function editRecipe(id) {
-    const recipe = state.recipes.find(r => r.id === id);
+    const recipe = recipes.find(r => r.id === id);
     if (recipe) openRecipeModal(recipe);
     else showToast('Không tìm thấy công thức', 'error');
 }
@@ -304,7 +330,7 @@ function openRecipeModal(editData = null) {
         closeModal('recipe-modal');
         document.getElementById('recipe-modal').remove();
     };
-    document.getElementById('save-recipe').onclick = () => {
+    document.getElementById('save-recipe').onclick = async () => {
         const name = document.getElementById('recipe-name').value.trim();
         const flower_type = document.getElementById('recipe-flower').value.trim();
         const creator_name = document.getElementById('recipe-creator').value.trim();
@@ -329,7 +355,6 @@ function openRecipeModal(editData = null) {
             }
         }
         const stages = tempStages.map(s => ({
-            id: generateId(),
             name: s.name,
             start_day: s.start_day,
             end_day: s.end_day,
@@ -338,56 +363,62 @@ function openRecipeModal(editData = null) {
             thresholds: s.thresholds || []
         }));
 
+        try {
+        let recipeId;
         if (editingRecipeId) {
-            const index = state.recipes.findIndex(r => r.id === editingRecipeId);
-            if (index !== -1) {
-                state.recipes[index] = {
-                    ...state.recipes[index],
-                    name,
-                    flower_type,
-                    creator_name: creator_name || state.recipes[index].creator_name,
-                    description,
-                    created_date,
-                    stages
-                };
-                showToast('Đã cập nhật công thức', 'success');
+            // Cập nhật recipe
+            await updateRecipe(editingRecipeId, {
+                name, flower_type, creator_id: 2, creator_name, description,
+                status: 'active', created_date
+            });
+            recipeId = editingRecipeId;
+            // Xóa stages cũ
+            const oldStages = await getStages(recipeId);
+            for (let st of oldStages) {
+                await deleteStage(st.id);
             }
         } else {
-            const newRecipe = {
-                id: generateId(),
-                name,
-                flower_type,
-                creator_id: 'u2',
-                creator_name: creator_name || 'Kỹ thuật viên',
-                description,
-                created_date,
-                status: 'active',
-                stages
-            };
-            state.recipes.push(newRecipe);
-            showToast('Đã thêm công thức mới', 'success');
+            // Thêm mới recipe
+            const newRecipe = await createRecipe({
+                name, flower_type, creator_id: 2, creator_name,
+                description, status: 'active', created_date
+            });
+            recipeId = newRecipe.id;
+            recipes.push(newRecipe);
         }
+
+        // Tạo stages mới
+        for (let stage of stages) {
+            await createStage(recipeId, stage);
+        }
+
         closeModal('recipe-modal');
         document.getElementById('recipe-modal').remove();
-        renderGrowth();
+        // Reload data
+        await loadRecipes();
+        await renderGrowth();
+        showToast(editingRecipeId ? 'Đã cập nhật công thức' : 'Đã thêm công thức mới', 'success');
+        } catch (err) {
+            showToast('Lỗi lưu: ' + err.message, 'error');
+        }
     };
 }
 
 // ===================== ĐIỀU CHỈNH CHU KỲ =====================
 export function openGrowthAdjust(id) {
-    state.growthAdjustId = id;
+    growthAdjustId = id;
     const input = document.getElementById('extend-days');
     if (input) input.value = 0;
     openModal('growth-modal');
 }
 
-export function applyGrowthAdjust() {
+export async function applyGrowthAdjust() {
     const extendDays = parseInt(document.getElementById('extend-days')?.value, 10) || 0;
     if (extendDays <= 0) {
         showToast('Nhập số ngày hợp lệ', 'warning');
         return;
     }
-    const recipe = state.recipes.find(r => r.id === state.growthAdjustId);
+    const recipe = recipes.find(r => r.id === growthAdjustId);
     if (recipe) {
         let targetStage = recipe.stages.find(s => !s.completed && s.currentDay !== null);
         if (!targetStage) {
@@ -403,16 +434,38 @@ export function applyGrowthAdjust() {
             }
         }
         recipe.status = 'active';
+        // Cập nhật lên server (chỉ cần cập nhật recipe status và stages)
+        try {
+            await updateRecipe(recipe.id, {
+                name: recipe.name,
+                flower_type: recipe.flower_type,
+                creator_id: 2,
+                creator_name: recipe.creator_name,
+                description: recipe.description,
+                status: recipe.status,
+                created_date: recipe.created_date
+            });
+            // TODO: cập nhật stages riêng nếu có API
+            showToast(`Đã kéo dài chu kỳ thêm ${extendDays} ngày`);
+        } catch (err) {
+            showToast('Lỗi cập nhật: ' + err.message, 'error');
+        }
     }
     closeModal('growth-modal');
-    renderGrowth();
-    showToast(`Đã kéo dài chu kỳ thêm ${extendDays} ngày`);
+    await renderGrowth();
 }
 
 // ===================== RENDER TOÀN BỘ TRANG =====================
-export function renderGrowthPage() {
+export async function renderGrowthPage() {
     const container = document.getElementById('page-growth');
     if (!container) return;
+
+    try {
+        await loadRecipes();
+    } catch (err) {
+        container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
+        return;
+    }
 
     container.innerHTML = `
         <div class="page-header">
@@ -440,7 +493,7 @@ export function renderGrowthPage() {
         </div>
     `;
 
-    renderGrowth();
+    await renderGrowth();
     document.getElementById('add-recipe-btn').onclick = () => openRecipeModal(null);
 }
 

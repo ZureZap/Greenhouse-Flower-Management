@@ -1,6 +1,7 @@
 /**
  * utils.js
  * Các hàm tiện ích dùng chung cho toàn bộ ứng dụng.
+ * Hỗ trợ nhận dữ liệu zones từ bên ngoài, không chỉ dùng state.
  */
 
 import { state } from './state.js';
@@ -9,9 +10,10 @@ import { state } from './state.js';
 
 /**
  * Lấy danh sách tất cả greenhouse từ cây zones
+ * @param {Array} zonesData - Cây zones (mặc định state.zones)
  * @returns {Array} Mảng { id, name }
  */
-export function getGreenhouses() {
+export function getGreenhouses(zonesData = state.zones) {
     const result = [];
     function traverse(nodes) {
         for (const node of nodes) {
@@ -21,7 +23,7 @@ export function getGreenhouses() {
             if (node.children) traverse(node.children);
         }
     }
-    traverse(state.zones);
+    traverse(zonesData);
     return result;
 }
 
@@ -64,25 +66,27 @@ export function getZoneById(zoneId, nodes = state.zones) {
 /**
  * Lấy tên zone từ ID
  * @param {string} zoneId - ID của zone
+ * @param {Array} zonesData - Cây zones (mặc định state.zones)
  * @returns {string} Tên zone hoặc ID nếu không tìm thấy
  */
-export function getZoneName(zoneId) {
-    const zone = getZoneById(zoneId);
+export function getZoneName(zoneId, zonesData = state.zones) {
+    const zone = getZoneById(zoneId, zonesData);
     return zone ? zone.name : zoneId;
 }
 
 /**
  * Lấy ID greenhouse chứa một zone
  * @param {string} zoneId - ID của zone
+ * @param {Array} zonesData - Cây zones (mặc định state.zones)
  * @returns {string|null} ID greenhouse hoặc null
  */
-export function getGreenhouseIdByZoneId(zoneId) {
-    const zone = getZoneById(zoneId);
+export function getGreenhouseIdByZoneId(zoneId, zonesData = state.zones) {
+    const zone = getZoneById(zoneId, zonesData);
     if (!zone) return null;
-    let parent = findParentNode(state.zones, zoneId);
+    let parent = findParentNode(zonesData, zoneId);
     while (parent) {
         if (parent.type === 'greenhouse') return parent.id;
-        parent = findParentNode(state.zones, parent.id);
+        parent = findParentNode(zonesData, parent.id);
     }
     return null;
 }
@@ -90,15 +94,16 @@ export function getGreenhouseIdByZoneId(zoneId) {
 /**
  * Lấy danh sách zone theo greenhouse
  * @param {string|null} greenhouseId - ID greenhouse (null để lấy tất cả)
+ * @param {Array} zonesData - Cây zones (mặc định state.zones)
  * @returns {Array} Mảng { id, name }
  */
-export function getZoneOptions(greenhouseId = null) {
+export function getZoneOptions(greenhouseId = null, zonesData = state.zones) {
     const zones = [];
     function traverse(nodes) {
         for (const node of nodes) {
             if (node.type === 'zone') {
                 if (greenhouseId) {
-                    const ghId = getGreenhouseIdByZoneId(node.id);
+                    const ghId = getGreenhouseIdByZoneId(node.id, zonesData);
                     if (ghId === greenhouseId) {
                         zones.push({ id: node.id, name: node.name });
                     }
@@ -109,7 +114,7 @@ export function getZoneOptions(greenhouseId = null) {
             if (node.children) traverse(node.children);
         }
     }
-    traverse(state.zones);
+    traverse(zonesData);
     return zones;
 }
 

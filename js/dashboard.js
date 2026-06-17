@@ -1,21 +1,23 @@
 /**
  * dashboard.js
  * Quản lý trang Dashboard - hiển thị tổng quan các chỉ số môi trường nhà kính,
- * bao gồm nhiệt độ, độ ẩm, ánh sáng, CO2 và các biểu đồ thống kê.
- * Hỗ trợ chuyển đổi giữa các nhà kính khác nhau.
- * Tích hợp dữ liệu thật từ state (thiết bị, cảnh báo, zone).
+ * hỗ trợ chuyển đổi giữa các nhà kính.
+ * Sử dụng API backend thay vì state.js.
  */
 
-import { state } from './state.js';
 import { getGreenhouses, getGreenhouseIdByZoneId, getZoneName, getZoneById } from './utils.js';
+import { getDevices, getAlerts, getGreenhouseStats, getGlobalStats, getZones } from './api.js';
 
 // --- Biến toàn cục ---
 let areaChart, radarChart, lineChart;
 let currentGreenhouseId = null;
+let greenhouses = [];
+let devices = [];
+let alerts = [];
+let zones = [];
 
 /**
  * Tạo nhãn thời gian cho 24 giờ (dựa trên giờ hiện tại, quay ngược 23 giờ)
- * @returns {string[]} Mảng 24 nhãn dạng "HH:00"
  */
 function generateTimeLabels() {
     const now = new Date();
@@ -25,56 +27,67 @@ function generateTimeLabels() {
     });
 }
 
-// ===================== HÀM LẤY ZONE THEO GREENHOUSE =====================
-/**
- * Lấy danh sách zone thuộc một greenhouse (dùng zone_id)
- */
+// ===================== LẤY DỮ LIỆU =====================
+async function loadDashboardData() {
+    try {
+        [devices, alerts, zones] = await Promise.all([
+            getDevices(),
+            getAlerts(),
+            getZones()
+        ]);
+        greenhouses = getGreenhouses(zones);
+    } catch (err) {
+        console.error('Lỗi load dashboard data:', err);
+        throw err;
+    }
+}
+
+// ===================== LẤY ZONE THEO GREENHOUSE =====================
 function getZonesByGreenhouse(greenhouseId) {
-    const zones = [];
+    const result = [];
     function traverse(nodes) {
         for (const node of nodes) {
             if (node.type === 'zone') {
                 const ghId = getGreenhouseIdByZoneId(node.id);
                 if (ghId === greenhouseId) {
-                    zones.push(node);
+                    result.push(node);
                 }
             }
             if (node.children) traverse(node.children);
         }
     }
-    traverse(state.zones);
-    return zones;
+    traverse(zones);
+    return result;
 }
 
 // ===================== TÍNH TOÁN DỮ LIỆU THỐNG KÊ =====================
 function getStatsForGreenhouse(greenhouseId) {
-    const zones = getZonesByGreenhouse(greenhouseId);
-    const zoneIds = zones.map(z => z.id);
+    const zoneList = getZonesByGreenhouse(greenhouseId);
+    const zoneIds = zoneList.map(z => z.id);
 
-    // Thiết bị: lọc theo zone_id
-    const devicesInGreenhouse = state.devices.filter(d => zoneIds.includes(d.zone_id));
-    const totalDevices = devicesInGreenhouse.length;
-    const activeDevices = devicesInGreenhouse.filter(d => d.status === 'ACTIVE').length;
-    const offlineDevices = devicesInGreenhouse.filter(d => d.status === 'OFFLINE').length;
-    const needReplace = devicesInGreenhouse.filter(d => d.status === 'NEEDS_REPLACEMENT').length;
+    // Thiết bị
+    const devsInGh = devices.filter(d => zoneIds.includes(d.zone_id));
+    const totalDevices = devsInGh.length;
+    const activeDevices = devsInGh.filter(d => d.status === 'ACTIVE').length;
+    const offlineDevices = devsInGh.filter(d => d.status === 'OFFLINE').length;
+    const needReplace = devsInGh.filter(d => d.status === 'NEEDS_REPLACEMENT').length;
 
-    // Cảnh báo: lọc theo zone_id
-    const alertsInGreenhouse = state.alerts.filter(a => zoneIds.includes(a.zone_id));
-    const criticalAlerts = alertsInGreenhouse.filter(a => a.severity === 'critical' && a.status === 'active').length;
-    const warningAlerts = alertsInGreenhouse.filter(a => a.severity === 'warning' && a.status === 'active').length;
-    const infoAlerts = alertsInGreenhouse.filter(a => a.severity === 'info' && a.status === 'active').length;
+    // Cảnh báo
+    const alertsInGh = alerts.filter(a => zoneIds.includes(a.zone_id));
+    const criticalAlerts = alertsInGh.filter(a => a.severity === 'critical' && a.status === 'active').length;
+    const warningAlerts = alertsInGh.filter(a => a.severity === 'warning' && a.status === 'active').length;
+    const infoAlerts = alertsInGh.filter(a => a.severity === 'info' && a.status === 'active').length;
 
-    // Zone đang trồng (có recipe_id)
-    const zonesWithRecipe = zones.filter(z => z.recipe_id);
+    // Zone đang trồng
+    const zonesWithRecipe = zoneList.filter(z => z.recipe_id);
 
-    // Nhiệt độ / độ ẩm trung bình (lấy từ zone nếu có)
+    // Nhiệt độ / độ ẩm trung bình
     let avgTemp = 0, avgHum = 0;
-    const zonesWithTemp = zones.filter(z => z.temperature !== undefined && z.humidity !== undefined);
+    const zonesWithTemp = zoneList.filter(z => z.temperature !== undefined && z.humidity !== undefined);
     if (zonesWithTemp.length > 0) {
         avgTemp = zonesWithTemp.reduce((sum, z) => sum + z.temperature, 0) / zonesWithTemp.length;
         avgHum = zonesWithTemp.reduce((sum, z) => sum + z.humidity, 0) / zonesWithTemp.length;
     } else {
-        // Fallback random nếu không có dữ liệu thực
         const seed = greenhouseId.length + greenhouseId.charCodeAt(0);
         avgTemp = 20 + (seed % 8) + Math.random() * 2;
         avgHum = 60 + (seed % 25) + Math.random() * 5;
@@ -91,13 +104,11 @@ function getStatsForGreenhouse(greenhouseId) {
         warningAlerts,
         infoAlerts,
         zonesWithRecipe: zonesWithRecipe.length,
-        totalZones: zones.length
+        totalZones: zoneList.length
     };
 }
 
-/**
- * Lấy dữ liệu biểu đồ (mô phỏng)
- */
+// ===================== DỮ LIỆU BIỂU ĐỒ =====================
 function getChartData(greenhouseId) {
     const seed = greenhouseId.length + greenhouseId.charCodeAt(0);
     const rand = (min, max) => Math.random() * (max - min) + min;
@@ -153,15 +164,7 @@ function initCharts(data, stats) {
                     }
                 ]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom' } },
-                scales: {
-                    x: { grid: { color: '#f0f0f0' } },
-                    y: { grid: { color: '#f0f0f0' } }
-                }
-            }
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
         });
     }
 
@@ -170,11 +173,10 @@ function initCharts(data, stats) {
     if (radarCtx) {
         const avgTemp = stats.avgTemp;
         const avgHum = stats.avgHum;
-        // Chuẩn hóa về thang 0-100
         const norm = (val, min, max) => Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
         const tempScore = norm(avgTemp, 15, 35);
         const humScore = norm(avgHum, 40, 90);
-        const lightScore = 65 + Math.random() * 20; // fallback
+        const lightScore = 65 + Math.random() * 20;
         const co2Score = 70 + Math.random() * 15;
         const phScore = 70 + Math.random() * 20;
 
@@ -199,18 +201,7 @@ function initCharts(data, stats) {
                     }
                 ]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom' } },
-                scales: {
-                    r: {
-                        min: 0,
-                        max: 100,
-                        ticks: { display: false }
-                    }
-                }
-            }
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
         });
     }
 
@@ -245,35 +236,32 @@ function initCharts(data, stats) {
                 maintainAspectRatio: false,
                 plugins: { legend: { position: 'bottom' } },
                 scales: {
-                    x: { grid: { color: '#f0f0f0' } },
-                    y: {
-                        position: 'left',
-                        title: { display: true, text: 'Ánh sáng (lux)' },
-                        grid: { color: '#f0f0f0' }
-                    },
-                    y1: {
-                        position: 'right',
-                        title: { display: true, text: 'CO2 (ppm)' },
-                        grid: { drawOnChartArea: false }
-                    }
+                    y: { position: 'left', title: { display: true, text: 'Ánh sáng (lux)' } },
+                    y1: { position: 'right', title: { display: true, text: 'CO2 (ppm)' }, grid: { drawOnChartArea: false } }
                 }
             }
         });
     }
 }
 
-// ===================== RENDER DASHBOARD =====================
-export function renderDashboardPage() {
+// ===================== RENDER =====================
+export async function renderDashboardPage() {
     const container = document.getElementById('page-dashboard');
     if (!container) return;
 
-    const greenhouses = getGreenhouses();
+    try {
+        await loadDashboardData();
+    } catch (err) {
+        container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
+        return;
+    }
+
     if (greenhouses.length === 0) {
         container.innerHTML = '<div class="card" style="padding:20px; text-align:center;">Không có dữ liệu nhà kính</div>';
         return;
     }
 
-    // Lấy greenhouse đã chọn từ localStorage hoặc chọn cái đầu
+    // Lấy greenhouse đã chọn
     const saved = localStorage.getItem('selectedGreenhouse');
     if (saved && greenhouses.find(g => g.id === saved)) {
         currentGreenhouseId = saved;
@@ -343,29 +331,23 @@ export function renderDashboardPage() {
             </div>
         </div>
 
+        <!-- Biểu đồ -->
         <div class="grid grid-8-4" style="margin-bottom:20px">
             <div class="card">
                 <div class="card-title">Biến động 24 giờ qua</div>
-                <div class="chart-container" style="height:300px">
-                    <canvas id="areaChart"></canvas>
-                </div>
+                <div class="chart-container" style="height:300px"><canvas id="areaChart"></canvas></div>
             </div>
             <div class="card">
                 <div class="card-title">Cân bằng môi trường</div>
-                <div class="chart-container" style="height:300px">
-                    <canvas id="radarChart"></canvas>
-                </div>
+                <div class="chart-container" style="height:300px"><canvas id="radarChart"></canvas></div>
             </div>
         </div>
         <div class="card">
             <div class="card-title">Xu hướng ánh sáng & CO2</div>
-            <div class="chart-container" style="height:250px">
-                <canvas id="lineChart"></canvas>
-            </div>
+            <div class="chart-container" style="height:250px"><canvas id="lineChart"></canvas></div>
         </div>
     `;
 
-    // Khởi tạo biểu đồ
     destroyCharts();
     initCharts(chartData, stats);
 
@@ -379,5 +361,5 @@ export function renderDashboardPage() {
     });
 }
 
-// Export các hàm cần thiết nếu có
+// Export các hàm cần thiết
 export { getGreenhouses };

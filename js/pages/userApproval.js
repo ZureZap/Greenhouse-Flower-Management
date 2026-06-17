@@ -1,19 +1,35 @@
-import { state } from '../state.js';
-import { approveUser, rejectUser, getCurrentUser } from '../auth.js';
+import { getCurrentUser } from '../auth.js';
 import { showToast, openModal, closeModal } from '../app.js';
+import { getUsers, updateUserRole, updateUserStatus } from '../api.js';
+
+// ===================== BIẾN TOÀN CỤC =====================
+let users = [];
+let pendingCount = 0;
 
 // ===================== CẬP NHẬT BADGE =====================
 function updatePageBellBadge() {
     const badge = document.getElementById('bell-badge-page');
     if (!badge) return;
-    const pendingCount = state.users.filter(u => u.status === 'PENDING').length;
+    pendingCount = users.filter(u => u.status === 'PENDING').length;
     badge.textContent = pendingCount;
     badge.style.display = pendingCount > 0 ? 'inline' : 'none';
 }
 
+// ===================== LOAD DỮ LIỆU =====================
+async function loadUsers() {
+    try {
+        users = await getUsers();
+        updatePageBellBadge();
+        return users;
+    } catch (err) {
+        showToast('Lỗi tải danh sách người dùng: ' + err.message, 'error');
+        throw err;
+    }
+}
+
 // ===================== POP-UP DANH SÁCH PENDING =====================
 function showPendingPopup() {
-    const pendingUsers = state.users.filter(u => u.status === 'PENDING');
+    const pendingUsers = users.filter(u => u.status === 'PENDING');
     if (pendingUsers.length === 0) {
         showToast('Không có tài khoản nào chờ phê duyệt', 'info');
         return;
@@ -50,36 +66,47 @@ function showPendingPopup() {
     openModal('pending-popup');
 
     document.querySelectorAll('.popup-approve').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', async () => {
             const id = btn.dataset.id;
-            approveUser(id);
-            showToast('Đã phê duyệt', 'success');
-            closeModal('pending-popup');
-            document.getElementById('pending-popup').remove();
-            updatePageBellBadge();
-            if (document.getElementById('page-user-approval')?.classList?.contains('active')) {
-                renderUserApprovalPage();
-            }
-            if (state.users.some(u => u.status === 'PENDING')) {
-                showPendingPopup();
-            }
-        });
-    });
-
-    document.querySelectorAll('.popup-reject').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const id = btn.dataset.id;
-            if (confirm('Từ chối sẽ xóa tài khoản này. Bạn chắc chắn?')) {
-                rejectUser(id);
-                showToast('Đã từ chối', 'info');
+            try {
+                await updateUserStatus(id, 'ACTIVE');
+                const user = users.find(u => u.id === id);
+                if (user) user.status = 'ACTIVE';
+                showToast('Đã phê duyệt', 'success');
                 closeModal('pending-popup');
                 document.getElementById('pending-popup').remove();
                 updatePageBellBadge();
                 if (document.getElementById('page-user-approval')?.classList?.contains('active')) {
                     renderUserApprovalPage();
                 }
-                if (state.users.some(u => u.status === 'PENDING')) {
+                if (users.some(u => u.status === 'PENDING')) {
                     showPendingPopup();
+                }
+            } catch (err) {
+                showToast('Lỗi: ' + err.message, 'error');
+            }
+        });
+    });
+
+    document.querySelectorAll('.popup-reject').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const id = btn.dataset.id;
+            if (confirm('Từ chối sẽ xóa tài khoản này. Bạn chắc chắn?')) {
+                try {
+                    await updateUserStatus(id, 'REJECTED');
+                    users = users.filter(u => u.id !== id);
+                    showToast('Đã từ chối', 'info');
+                    closeModal('pending-popup');
+                    document.getElementById('pending-popup').remove();
+                    updatePageBellBadge();
+                    if (document.getElementById('page-user-approval')?.classList?.contains('active')) {
+                        renderUserApprovalPage();
+                    }
+                    if (users.some(u => u.status === 'PENDING')) {
+                        showPendingPopup();
+                    }
+                } catch (err) {
+                    showToast('Lỗi: ' + err.message, 'error');
                 }
             }
         });
@@ -99,17 +126,24 @@ function showPendingPopup() {
 }
 
 // ===================== TRANG QUẢN LÝ TÀI KHOẢN =====================
-export function renderUserApprovalPage() {
+export async function renderUserApprovalPage() {
     const container = document.getElementById('page-user-approval');
     if (!container) return;
+
     const currentUser = getCurrentUser();
     if (!currentUser || currentUser.role !== 'OWNER') {
         container.innerHTML = '<div class="card" style="padding:20px; text-align:center;">Bạn không có quyền truy cập trang này.</div>';
         return;
     }
-    const pendingCount = state.users.filter(u => u.status === 'PENDING').length;
-    // Chỉ lấy user đã ACTIVE
-    const activeUsers = state.users.filter(u => u.status === 'ACTIVE');
+
+    try {
+        await loadUsers();
+    } catch (err) {
+        container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
+        return;
+    }
+
+    const activeUsers = users.filter(u => u.status === 'ACTIVE');
     activeUsers.sort((a, b) => a.username.localeCompare(b.username));
 
     let html = `
@@ -171,13 +205,16 @@ export function renderUserApprovalPage() {
 
     // Sự kiện đổi role
     document.querySelectorAll('.role-select').forEach(select => {
-        select.addEventListener('change', (e) => {
+        select.addEventListener('change', async (e) => {
             const userId = e.target.dataset.id;
             const newRole = e.target.value;
-            const user = state.users.find(u => u.id === userId);
-            if (user) {
-                user.role = newRole;
+            try {
+                await updateUserRole(userId, newRole);
+                const user = users.find(u => u.id === userId);
+                if (user) user.role = newRole;
                 showToast(`Đã cập nhật role cho ${user.username}`, 'success');
+            } catch (err) {
+                showToast('Lỗi cập nhật role: ' + err.message, 'error');
             }
         });
     });

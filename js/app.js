@@ -4,7 +4,6 @@
  * và hiển thị icon chuông phê duyệt cho OWNER.
  */
 
-import { state } from './state.js';
 import { renderDashboardPage } from './dashboard.js';
 import { renderDevicesPage } from './devices.js';
 import { renderZonesPage } from './zones.js';

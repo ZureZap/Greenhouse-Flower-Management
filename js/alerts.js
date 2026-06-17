@@ -1,34 +1,56 @@
 /**
  * alerts.js
  * Quản lý hệ thống cảnh báo nhà kính
- * Chức năng: hiển thị danh sách cảnh báo, thống kê, cơ chế leo thang,
- * cho phép xác nhận, giải quyết và loại bỏ cảnh báo.
- * Tuân thủ ERD: Alert có zone_id thay vì zone (tên).
+ * Sử dụng API backend thay vì state.js.
  */
 
-import { state } from './state.js';
 import { showToast } from './app.js';
-import { getGreenhouses, getGreenhouseIdByZoneId, getZoneName, timeSince } from './utils.js';
+import { getAlerts, updateAlertStatus, deleteAlert } from './api.js';
+import {
+    getGreenhouses,
+    getGreenhouseIdByZoneId,
+    getZoneName,
+    timeSince,
+    getZones
+} from './utils.js';
 
 // ===================== BIẾN TOÀN CỤC =====================
 let filterGreenhouseId = null;
+let alerts = [];
+let zones = [];
+let greenhouses = [];
+
+// ===================== LOAD DỮ LIỆU =====================
+async function loadAlertsData() {
+    try {
+        [alerts, zones] = await Promise.all([
+            getAlerts(),
+            getZones()
+        ]);
+        greenhouses = getGreenhouses(zones);
+        return { alerts, zones, greenhouses };
+    } catch (err) {
+        showToast('Lỗi tải dữ liệu cảnh báo: ' + err.message, 'error');
+        throw err;
+    }
+}
 
 // ===================== RENDER =====================
-export function renderAlerts() {
-    let alerts = state.alerts.filter(a => a.status !== 'resolved');
+export async function renderAlerts() {
+    let filteredAlerts = alerts.filter(a => a.status !== 'resolved');
 
     // Lọc theo greenhouse
     if (filterGreenhouseId) {
-        alerts = alerts.filter(a => {
-            const ghId = getGreenhouseIdByZoneId(a.zone_id);
+        filteredAlerts = filteredAlerts.filter(a => {
+            const ghId = getGreenhouseIdByZoneId(a.zone_id, zones);
             return ghId === filterGreenhouseId;
         });
     }
 
-    // --- Cập nhật các chỉ số thống kê ---
-    const active = alerts.filter(a => a.status === 'active');
-    const acked = alerts.filter(a => a.status === 'acknowledged');
-    const critical = alerts.filter(a => a.severity === 'critical');
+    // --- Cập nhật thống kê ---
+    const active = filteredAlerts.filter(a => a.status === 'active');
+    const acked = filteredAlerts.filter(a => a.status === 'acknowledged');
+    const critical = filteredAlerts.filter(a => a.severity === 'critical');
 
     const activeCountEl = document.getElementById('al-active-count');
     if (activeCountEl) activeCountEl.textContent = active.length;
@@ -42,29 +64,28 @@ export function renderAlerts() {
         criticalEl.style.color = critical.length > 0 ? '#ef4444' : '#10b981';
     }
 
-    // --- Ánh xạ mức độ nghiêm trọng ---
+    // --- Ánh xạ mức độ ---
     const severityMap = {
         critical: ['chip-error', '🔴 Nghiêm trọng'],
         warning: ['chip-warning', '⚠ Cảnh báo'],
         info: ['chip-info', 'ℹ Thông tin']
     };
-
     const cardClassMap = {
         critical: 'alert-critical',
         warning: 'alert-warning-card',
         info: 'alert-info-card'
     };
 
-    // --- Hiển thị danh sách cảnh báo chưa giải quyết ---
+    // --- Danh sách cảnh báo ---
     const alertList = document.getElementById('alert-list');
     if (alertList) {
-        if (alerts.length === 0) {
+        if (filteredAlerts.length === 0) {
             alertList.innerHTML = `<div style="padding:20px; text-align:center; color:#6b7280;">
                 ${filterGreenhouseId ? 'Không có cảnh báo nào trong nhà kính này.' : 'Không có cảnh báo nào đang hoạt động.'}
             </div>`;
         } else {
-            alertList.innerHTML = alerts.map(a => {
-                const zoneName = getZoneName(a.zone_id) || 'Không xác định';
+            alertList.innerHTML = filteredAlerts.map(a => {
+                const zoneName = getZoneName(a.zone_id, zones) || 'Không xác định';
                 return `
                     <div class="alert-card ${cardClassMap[a.severity]}${a.status === 'acknowledged' ? ' alert-acked' : ''}">
                         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
@@ -81,7 +102,7 @@ export function renderAlerts() {
                                     <div style="font-size:0.85rem;color:#6b7280;margin-bottom:6px">${a.description}</div>
                                     <div style="display:flex;gap:12px;font-size:0.78rem;color:#9ca3af;flex-wrap:wrap">
                                         <span>📍 ${zoneName}</span>
-                                        <span>🕐 ${timeSince(a.timestamp)}</span>
+                                        <span>🕐 ${timeSince(new Date(a.timestamp))}</span>
                                         ${a.acknowledgedBy ? `<span>✓ ${a.acknowledgedBy}</span>` : ''}
                                     </div>
                                 </div>
@@ -101,13 +122,12 @@ export function renderAlerts() {
         }
     }
 
-    // --- Timeline cơ chế leo thang cảnh báo (mô phỏng) ---
+    // --- Timeline (mô phỏng) ---
     const escalationSteps = [
         { time: 'Phút 0', action: 'Thông báo trên Web/App cho Người vận hành', status: 'completed' },
         { time: 'Phút 15', action: 'Gửi SMS cho Kỹ sư trưởng', status: 'active' },
         { time: 'Phút 30', action: 'Gọi điện tự động cho Quản lý nhà kính', status: 'pending' }
     ];
-
     const timeline = document.getElementById('escalation-timeline');
     if (timeline) {
         timeline.innerHTML = escalationSteps.map(step => `
@@ -125,11 +145,16 @@ export function renderAlerts() {
 }
 
 // ===================== RENDER TRANG =====================
-export function renderAlertsPage() {
+export async function renderAlertsPage() {
     const container = document.getElementById('page-alerts');
     if (!container) return;
 
-    const greenhouses = getGreenhouses();
+    try {
+        await loadAlertsData();
+    } catch (err) {
+        container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
+        return;
+    }
 
     container.innerHTML = `
         <div class="page-header" style="position: relative;">
@@ -176,40 +201,57 @@ export function renderAlertsPage() {
         </div>
     `;
 
+    // Sự kiện lọc greenhouse
     const filterSelect = document.getElementById('greenhouse-filter');
     filterSelect.addEventListener('change', (e) => {
         filterGreenhouseId = e.target.value || null;
         renderAlerts();
     });
 
-    renderAlerts();
+    await renderAlerts();
 }
 
-// ===================== HÀM XỬ LÝ SỰ KIỆN =====================
-export function acknowledgeAlert(id) {
-    const alert = state.alerts.find(a => a.id === id);
-    if (alert) {
-        alert.status = 'acknowledged';
-        alert.acknowledgedBy = 'Người dùng hiện tại';
+// ===================== XỬ LÝ SỰ KIỆN (GỌI API) =====================
+export async function acknowledgeAlert(id) {
+    try {
+        await updateAlertStatus(id, 'ACKNOWLEDGED', 'Người dùng hiện tại');
+        // Cập nhật cục bộ
+        const alert = alerts.find(a => a.id === id);
+        if (alert) {
+            alert.status = 'acknowledged';
+            alert.acknowledgedBy = 'Người dùng hiện tại';
+        }
+        await renderAlerts();
+        showToast('Đã xác nhận cảnh báo');
+    } catch (err) {
+        showToast('Lỗi xác nhận cảnh báo: ' + err.message, 'error');
     }
-    renderAlerts();
-    showToast('Đã xác nhận cảnh báo');
 }
 
-export function resolveAlert(id) {
-    const alert = state.alerts.find(a => a.id === id);
-    if (alert) alert.status = 'resolved';
-    renderAlerts();
-    showToast('Đã giải quyết cảnh báo');
+export async function resolveAlert(id) {
+    try {
+        await updateAlertStatus(id, 'RESOLVED');
+        const alert = alerts.find(a => a.id === id);
+        if (alert) alert.status = 'resolved';
+        await renderAlerts();
+        showToast('Đã giải quyết cảnh báo');
+    } catch (err) {
+        showToast('Lỗi giải quyết cảnh báo: ' + err.message, 'error');
+    }
 }
 
-export function dismissAlert(id) {
-    state.alerts = state.alerts.filter(a => a.id !== id);
-    renderAlerts();
-    showToast('Đã loại bỏ cảnh báo', 'info');
+export async function dismissAlert(id) {
+    try {
+        await deleteAlert(id);
+        alerts = alerts.filter(a => a.id !== id);
+        await renderAlerts();
+        showToast('Đã loại bỏ cảnh báo', 'info');
+    } catch (err) {
+        showToast('Lỗi xóa cảnh báo: ' + err.message, 'error');
+    }
 }
 
-// Expose các hàm xử lý ra window để inline onclick hoạt động
+// ===================== EXPOSE GLOBAL =====================
 window.acknowledgeAlert = acknowledgeAlert;
 window.resolveAlert = resolveAlert;
 window.dismissAlert = dismissAlert;

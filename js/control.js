@@ -2,29 +2,47 @@
  * control.js
  * Quản lý bảng điều khiển thiết bị OUTPUT (actuator).
  * Dựa trên ERD: Device (loại OUTPUT_DEVICE) có controlProperties (1-1).
- * Hỗ trợ lọc theo greenhouse.
+ * Sử dụng API backend thay vì state.js.
  */
 
-import { state } from './state.js';
 import { showToast } from './app.js';
-import { getGreenhouses, getZoneById, getGreenhouseIdByZoneId, getTimeRemaining } from './utils.js';
+import { getDevices, getControlProperties, updateControlProperty } from './api.js';
+import { getGreenhouses, getGreenhouseIdByZoneId, getZoneName, getTimeRemaining, getZones } from './utils.js';
 
 // ===================== BIẾN TOÀN CỤC =====================
 let filterGreenhouseId = null;
+let devices = [];
+let controlProperties = [];
+let zones = [];
+
+// ===================== LOAD DỮ LIỆU =====================
+async function loadControlData() {
+    try {
+        [devices, controlProperties, zones] = await Promise.all([
+            getDevices(),
+            getControlProperties(),
+            getZones()
+        ]);
+        return { devices, controlProperties, zones };
+    } catch (err) {
+        showToast('Lỗi tải dữ liệu điều khiển: ' + err.message, 'error');
+        throw err;
+    }
+}
 
 // ===================== RENDER =====================
-export function renderControls() {
+export async function renderControls() {
     const container = document.getElementById('control-cards');
     if (!container) return;
 
     // Lấy danh sách actuator (device_type === 'OUTPUT_DEVICE')
-    const actuatorDevices = state.devices.filter(d => d.device_type === 'OUTPUT_DEVICE');
+    const actuatorDevices = devices.filter(d => d.device_type === 'OUTPUT_DEVICE');
     const controlMap = {};
-    (state.controlProperties || []).forEach(cp => {
+    controlProperties.forEach(cp => {
         controlMap[cp.device_id] = cp;
     });
 
-    let devices = actuatorDevices
+    let devicesWithControl = actuatorDevices
         .filter(d => controlMap[d.id])
         .map(d => ({
             ...d,
@@ -33,23 +51,24 @@ export function renderControls() {
 
     // Lọc theo greenhouse
     if (filterGreenhouseId) {
-        devices = devices.filter(d => {
-            const ghId = getGreenhouseIdByZoneId(d.zone_id);
+        devicesWithControl = devicesWithControl.filter(d => {
+            const ghId = getGreenhouseIdByZoneId(d.zone_id, zones);
             return ghId === filterGreenhouseId;
         });
     }
 
-    if (devices.length === 0) {
+    if (devicesWithControl.length === 0) {
         container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#6b7280;">
             ${filterGreenhouseId ? 'Không có thiết bị điều khiển nào trong nhà kính này.' : 'Chưa có thiết bị điều khiển.'}
         </div>`;
         return;
     }
 
-    container.innerHTML = devices.map(device => {
+    container.innerHTML = devicesWithControl.map(device => {
         const control = device.control;
         const isManual = control.mode === 'MANUAL';
         const isActive = control.isActive;
+        const zoneName = getZoneName(device.zone_id, zones) || 'N/A';
 
         return `
         <div class="control-card ${isManual ? 'control-manual' : 'control-auto'}">
@@ -60,7 +79,7 @@ export function renderControls() {
                     </div>
                     <div>
                         <div style="font-weight:600">${device.name}</div>
-                        <div style="font-size:0.8rem;color:#6b7280">${device.zone_id ? (getZoneById(device.zone_id)?.name || 'N/A') : 'N/A'}</div>
+                        <div style="font-size:0.8rem;color:#6b7280">${zoneName}</div>
                     </div>
                 </div>
                 <span class="chip ${control.mode === 'AUTO' ? 'chip-success' : 'chip-warning'}">${control.mode}</span>
@@ -75,7 +94,7 @@ export function renderControls() {
             ${isManual && control.autoResetTime ? `
                 <div class="warn-box" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
                     <span style="font-size:0.8rem;font-weight:600">
-                        Tự động về AUTO sau: ${getTimeRemaining(control.autoResetTime)}
+                        Tự động về AUTO sau: ${getTimeRemaining(new Date(control.autoResetTime))}
                     </span>
                     <button class="btn btn-outline btn-sm" onclick="window.resetToAuto('${device.id}')">
                         Trả về ngay
@@ -98,11 +117,18 @@ export function renderControls() {
     `}).join('');
 }
 
-export function renderControlPage() {
+export async function renderControlPage() {
     const container = document.getElementById('page-control');
     if (!container) return;
 
-    const greenhouses = getGreenhouses();
+    try {
+        await loadControlData();
+    } catch (err) {
+        container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
+        return;
+    }
+
+    const greenhouses = getGreenhouses(zones);
 
     container.innerHTML = `
         <div class="page-header">
@@ -155,57 +181,106 @@ export function renderControlPage() {
         renderControls();
     });
 
-    renderControls();
+    await renderControls();
 }
 
 // ===================== HÀM XỬ LÝ SỰ KIỆN =====================
-export function toggleControlMode(deviceId) {
-    const device = state.devices.find(d => d.id === deviceId);
+export async function toggleControlMode(deviceId) {
+    const device = devices.find(d => d.id === deviceId);
     if (!device) return;
-    const control = state.controlProperties.find(cp => cp.device_id === deviceId);
+    const control = controlProperties.find(cp => cp.device_id === deviceId);
     if (!control) return;
 
+    let newMode, newAutoResetTime;
     if (control.mode === 'AUTO') {
-        control.mode = 'MANUAL';
-        control.autoResetTime = new Date(Date.now() + 2 * 3600000);
+        newMode = 'MANUAL';
+        newAutoResetTime = new Date(Date.now() + 2 * 3600000);
         showToast('Chế độ thủ công sẽ tự động tắt sau 2 giờ', 'info');
     } else {
-        control.mode = 'AUTO';
-        control.autoResetTime = null;
+        newMode = 'AUTO';
+        newAutoResetTime = null;
         showToast('Đã chuyển về chế độ tự động');
     }
-    renderControls();
+
+    try {
+        await updateControlProperty(deviceId, {
+            mode: newMode,
+            isActive: control.isActive,
+            valuePercent: control.valuePercent,
+            autoResetTime: newAutoResetTime
+        });
+        control.mode = newMode;
+        control.autoResetTime = newAutoResetTime;
+        renderControls();
+    } catch (err) {
+        showToast('Lỗi cập nhật: ' + err.message, 'error');
+    }
 }
 
-export function toggleDevice(deviceId) {
-    const device = state.devices.find(d => d.id === deviceId);
+export async function toggleDevice(deviceId) {
+    const device = devices.find(d => d.id === deviceId);
     if (!device) return;
-    const control = state.controlProperties.find(cp => cp.device_id === deviceId);
+    const control = controlProperties.find(cp => cp.device_id === deviceId);
     if (!control) return;
 
     if (control.mode === 'AUTO') {
         showToast('Vui lòng chuyển sang chế độ thủ công trước', 'warning');
         return;
     }
-    control.isActive = !control.isActive;
-    showToast(`${control.isActive ? 'Đã bật' : 'Đã tắt'} ${device.name}`);
-    renderControls();
+
+    const newIsActive = !control.isActive;
+    try {
+        await updateControlProperty(deviceId, {
+            mode: control.mode,
+            isActive: newIsActive,
+            valuePercent: control.valuePercent,
+            autoResetTime: control.autoResetTime
+        });
+        control.isActive = newIsActive;
+        showToast(`${newIsActive ? 'Đã bật' : 'Đã tắt'} ${device.name}`);
+        renderControls();
+    } catch (err) {
+        showToast('Lỗi cập nhật: ' + err.message, 'error');
+    }
 }
 
-export function setControlValue(deviceId, value) {
-    const control = state.controlProperties.find(cp => cp.device_id === deviceId);
+export async function setControlValue(deviceId, value) {
+    const control = controlProperties.find(cp => cp.device_id === deviceId);
     if (!control) return;
-    control.valuePercent = parseInt(value, 10);
-    renderControls();
+
+    const newVal = parseInt(value, 10);
+    try {
+        await updateControlProperty(deviceId, {
+            mode: control.mode,
+            isActive: control.isActive,
+            valuePercent: newVal,
+            autoResetTime: control.autoResetTime
+        });
+        control.valuePercent = newVal;
+        renderControls();
+    } catch (err) {
+        showToast('Lỗi cập nhật: ' + err.message, 'error');
+    }
 }
 
-export function resetToAuto(deviceId) {
-    const control = state.controlProperties.find(cp => cp.device_id === deviceId);
+export async function resetToAuto(deviceId) {
+    const control = controlProperties.find(cp => cp.device_id === deviceId);
     if (!control) return;
-    control.mode = 'AUTO';
-    control.autoResetTime = null;
-    showToast('Đã trả về chế độ tự động');
-    renderControls();
+
+    try {
+        await updateControlProperty(deviceId, {
+            mode: 'AUTO',
+            isActive: control.isActive,
+            valuePercent: control.valuePercent,
+            autoResetTime: null
+        });
+        control.mode = 'AUTO';
+        control.autoResetTime = null;
+        showToast('Đã trả về chế độ tự động');
+        renderControls();
+    } catch (err) {
+        showToast('Lỗi cập nhật: ' + err.message, 'error');
+    }
 }
 
 // Expose global
