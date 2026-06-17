@@ -188,14 +188,24 @@ function handleDeleteClick(e) {
 // ===================== LOAD DỮ LIỆU =====================
 async function loadZones() {
     try {
-        zones = await getZones();
-        // Chuyển đổi flat list thành cây (nếu API trả về dạng flat)
-        // Nếu API đã trả về cây thì không cần
+        const flatZones = await getZones();
+        // Build tree
+        const map = {};
+        const tree = [];
+        flatZones.forEach(node => {
+            map[node.id] = { ...node, children: [] };
+        });
+        flatZones.forEach(node => {
+            if (node.parent_id !== null && map[node.parent_id]) {
+                map[node.parent_id].children.push(map[node.id]);
+            } else {
+                tree.push(map[node.id]);
+            }
+        });
+        zones = tree; // Gán lại biến global
         return zones;
-    } catch (err) {
-        showToast('Lỗi tải danh sách vùng: ' + err.message, 'error');
-        throw err;
-    }
+    } catch (err) { showToast('Lỗi tải danh sách vùng: ' + err.message, 'error');
+        throw err; }
 }
 
 // ===================== RENDER =====================

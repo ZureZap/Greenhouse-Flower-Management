@@ -4,8 +4,6 @@
  * Hỗ trợ nhận dữ liệu zones từ bên ngoài, không chỉ dùng state.
  */
 
-import { state } from './state.js';
-
 // ===================== ZONE UTILITIES =====================
 
 /**

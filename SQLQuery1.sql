@@ -1,9 +1,7 @@
 -- ============================================
 -- Script tạo Database SmartFarmDB và chèn dữ liệu mẫu
--- Tương thích với SQL Server
 -- ============================================
 
--- 1. Kiểm tra và tạo database
 IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'SmartFarmDB')
 BEGIN
     CREATE DATABASE SmartFarmDB;
@@ -13,18 +11,15 @@ GO
 USE SmartFarmDB;
 GO
 
--- ============================================
--- TẠO CÁC BẢNG
--- ============================================
-
--- 3. User
+-- 3. User (Đã sửa Role thành tiếng Anh và thêm cột status)
 CREATE TABLE [User] (
     user_id INT IDENTITY(1,1) PRIMARY KEY,
     user_name NVARCHAR(100) NOT NULL,
     password NVARCHAR(255) NOT NULL,
     email NVARCHAR(100) NOT NULL,
     phone_number NVARCHAR(20),
-    role NVARCHAR(30) NOT NULL CHECK (role IN (N'Chủ trang trại', N'Kỹ thuật viên', N'Nhân viên vận hành'))
+    role NVARCHAR(30) NOT NULL CHECK (role IN ('OWNER', 'TECHNICIAN', 'OPERATOR')),
+    status NVARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
 );
 GO
 
@@ -61,13 +56,16 @@ CREATE TABLE Recipe (
 );
 GO
 
--- 7. Zone
+-- 7. Zone (Đã thêm temperature, humidity, status)
 CREATE TABLE Zone (
     zone_id INT IDENTITY(1,1) PRIMARY KEY,
     greenhouse_id INT NOT NULL,
     recipe_id INT NULL,
     zone_name NVARCHAR(100) NOT NULL,
     start_date DATE,
+    temperature DECIMAL(5,2) NULL,
+    humidity INT NULL,
+    status NVARCHAR(20) NULL,
     FOREIGN KEY (greenhouse_id) REFERENCES Greenhouse(greenhouse_id),
     FOREIGN KEY (recipe_id) REFERENCES Recipe(recipe_id)
 );
@@ -100,7 +98,7 @@ CREATE TABLE Device (
 );
 GO
 
--- 10. ControlProperties (bổ sung từ state.js)
+-- 10. ControlProperties
 CREATE TABLE ControlProperties (
     device_id INT PRIMARY KEY,
     mode NVARCHAR(10) NOT NULL CHECK (mode IN ('AUTO', 'MANUAL')),
@@ -175,16 +173,16 @@ CREATE TABLE AlertLog (
 GO
 
 -- ============================================
--- CHÈN DỮ LIỆU MẪU TỪ state.js
+-- CHÈN DỮ LIỆU MẪU 
 -- ============================================
 
--- 1. Users
+-- 1. Users (Đã sửa Role và Status)
 SET IDENTITY_INSERT [User] ON;
-INSERT INTO [User] (user_id, user_name, password, email, phone_number, role) VALUES
-(1, 'owner1', '123456', 'owner@farm.com', '0909123456', N'Chủ trang trại'),
-(2, 'tech1', '123456', 'tech@farm.com', '0909123457', N'Kỹ thuật viên'),
-(3, 'op1', '123456', 'operator@farm.com', '0909123458', N'Nhân viên vận hành'),
-(4, 'pendingUser', '123456', 'pending@farm.com', '0909123459', N'Nhân viên vận hành');
+INSERT INTO [User] (user_id, user_name, password, email, phone_number, role, status) VALUES
+(1, 'owner1', '123456', 'owner@farm.com', '0909123456', 'OWNER', 'ACTIVE'),
+(2, 'tech1', '123456', 'tech@farm.com', '0909123457', 'TECHNICIAN', 'ACTIVE'),
+(3, 'op1', '123456', 'operator@farm.com', '0909123458', 'OPERATOR', 'ACTIVE'),
+(4, 'pendingUser', '123456', 'pending@farm.com', '0909123459', 'OPERATOR', 'PENDING');
 SET IDENTITY_INSERT [User] OFF;
 GO
 
@@ -212,12 +210,12 @@ INSERT INTO Recipe (recipe_id, creator, recipe_name, flower_type, description, s
 SET IDENTITY_INSERT Recipe OFF;
 GO
 
--- 5. Zone
+-- 5. Zone (Thêm dữ liệu giả lập cho temp, humid, status)
 SET IDENTITY_INSERT Zone ON;
-INSERT INTO Zone (zone_id, greenhouse_id, recipe_id, zone_name, start_date) VALUES
-(1, 1, 1, N'Khu vực 1 - Hoa Hồng', '2025-01-01'),
-(2, 1, 2, N'Khu vực 2 - Hoa Cúc', '2025-01-15'),
-(3, 2, 3, N'Khu vực 1 - Hoa Lan', '2025-02-01');
+INSERT INTO Zone (zone_id, greenhouse_id, recipe_id, zone_name, start_date, temperature, humidity, status) VALUES
+(1, 1, 1, N'Khu vực 1 - Hoa Hồng', '2025-01-01', 25.5, 75, 'optimal'),
+(2, 1, 2, N'Khu vực 2 - Hoa Cúc', '2025-01-15', 26.0, 70, 'normal'),
+(3, 2, 3, N'Khu vực 1 - Hoa Lan', '2025-02-01', 24.5, 80, 'optimal');
 SET IDENTITY_INSERT Zone OFF;
 GO
 
@@ -254,19 +252,14 @@ GO
 
 -- 9. GrowthStage (cho từng recipe)
 SET IDENTITY_INSERT GrowthStage ON;
--- Recipe 1
 INSERT INTO GrowthStage (stage_id, recipe_id, stage_name, start_day, end_day, completed, current_day) VALUES
 (1, 1, N'Giai đoạn ươm', 1, 10, 1, 10),
 (2, 1, N'Phát triển lá', 11, 25, 0, 8),
 (3, 1, N'Ra nụ', 26, 37, 0, NULL),
-(4, 1, N'Nở hoa', 38, 45, 0, NULL);
--- Recipe 2
-INSERT INTO GrowthStage (stage_id, recipe_id, stage_name, start_day, end_day, completed, current_day) VALUES
+(4, 1, N'Nở hoa', 38, 45, 0, NULL),
 (5, 2, N'Giai đoạn ươm', 1, 8, 1, 8),
 (6, 2, N'Phát triển', 9, 26, 0, 12),
-(7, 2, N'Ra nụ', 27, 36, 0, NULL);
--- Recipe 3
-INSERT INTO GrowthStage (stage_id, recipe_id, stage_name, start_day, end_day, completed, current_day) VALUES
+(7, 2, N'Ra nụ', 27, 36, 0, NULL),
 (8, 3, N'Giai đoạn ươm', 1, 14, 1, 14),
 (9, 3, N'Phát triển lá', 15, 34, 1, 20),
 (10, 3, N'Ra nụ', 35, 49, 0, 5),
@@ -276,48 +269,27 @@ GO
 
 -- 10. Threshold (cho từng stage)
 SET IDENTITY_INSERT Threshold ON;
--- Stage 1
 INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
 (1, 1, 'Temperature', 22, 26),
-(2, 1, 'SoilHumidity', 70, 85);
--- Stage 2
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(2, 1, 'SoilHumidity', 70, 85),
 (3, 2, 'Temperature', 24, 28),
-(4, 2, 'SoilHumidity', 65, 80);
--- Stage 3
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(4, 2, 'SoilHumidity', 65, 80),
 (5, 3, 'Temperature', 22, 26),
-(6, 3, 'SoilHumidity', 60, 75);
--- Stage 4
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(6, 3, 'SoilHumidity', 60, 75),
 (7, 4, 'Temperature', 20, 24),
-(8, 4, 'SoilHumidity', 55, 70);
--- Stage 5
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(8, 4, 'SoilHumidity', 55, 70),
 (9, 5, 'Temperature', 20, 24),
-(10, 5, 'SoilHumidity', 65, 80);
--- Stage 6
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(10, 5, 'SoilHumidity', 65, 80),
 (11, 6, 'Temperature', 22, 26),
-(12, 6, 'SoilHumidity', 60, 75);
--- Stage 7
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(12, 6, 'SoilHumidity', 60, 75),
 (13, 7, 'Temperature', 20, 24),
-(14, 7, 'SoilHumidity', 55, 70);
--- Stage 8
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(14, 7, 'SoilHumidity', 55, 70),
 (15, 8, 'Temperature', 24, 28),
-(16, 8, 'SoilHumidity', 75, 90);
--- Stage 9
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(16, 8, 'SoilHumidity', 75, 90),
 (17, 9, 'Temperature', 26, 30),
-(18, 9, 'SoilHumidity', 70, 85);
--- Stage 10
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(18, 9, 'SoilHumidity', 70, 85),
 (19, 10, 'Temperature', 24, 28),
-(20, 10, 'SoilHumidity', 65, 80);
--- Stage 11
-INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
+(20, 10, 'SoilHumidity', 65, 80),
 (21, 11, 'Temperature', 22, 26),
 (22, 11, 'SoilHumidity', 60, 75);
 SET IDENTITY_INSERT Threshold OFF;
@@ -346,11 +318,3 @@ INSERT INTO [Log] (log_id, device_id, user_id, action, triggered_by, log_time) V
 (7, 2, 4, N'UPDATE: Cảm biến nhiệt độ #2 - Trạng thái OFFLINE → ONLINE', 'USER', DATEADD(MINUTE, -7.5, GETDATE()));
 SET IDENTITY_INSERT [Log] OFF;
 GO
-
--- 13. SensorData (không có dữ liệu thực, có thể thêm sau)
--- 14. ZoneExpanded và selectedZone không cần lưu trong DB (chỉ front-end)
--- 15. GrowthAdjustId, pendingDeviceId, currentUser không cần lưu
-
--- ============================================
--- KẾT THÚC SCRIPT
--- ============================================
