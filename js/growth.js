@@ -19,7 +19,7 @@ import {
 
 // ===================== BIẾN TOÀN CỤC =====================
 let recipes = [];
-let growthAdjustId = null;  // thay vì state.growthAdjustId
+let growthAdjustId = null; 
 
 // ===================== HÀM TIỆN ÍCH TÍNH TOÁN =====================
 
@@ -144,7 +144,7 @@ export async function renderGrowth() {
         `;
     }).join('');
 
-    // Gắn sự kiện
+    // Gắn sự kiện (Đã cập nhật gọi hàm handleDeleteRecipe)
     document.querySelectorAll('.adjust-btn').forEach(btn => {
         btn.onclick = () => openGrowthAdjust(btn.dataset.id);
     });
@@ -152,15 +152,15 @@ export async function renderGrowth() {
         btn.onclick = () => editRecipe(btn.dataset.id);
     });
     document.querySelectorAll('.delete-btn').forEach(btn => {
-        btn.onclick = () => deleteRecipe(btn.dataset.id);
+        btn.onclick = () => handleDeleteRecipe(btn.dataset.id); 
     });
 }
 
-// ===================== XÓA CÔNG THỨC =====================
-async function deleteRecipe(id) {
+// ===================== XÓA CÔNG THỨC (Đã đổi tên) =====================
+async function handleDeleteRecipe(id) {
     if (confirm('Bạn có chắc chắn muốn xóa công thức này?')) {
         try {
-            await deleteRecipe(id);
+            await deleteRecipe(id); // Gọi hàm xóa từ api.js
             recipes = recipes.filter(r => r.id !== id);
             await renderGrowth();
             showToast('Đã xóa công thức', 'info');
@@ -364,40 +364,40 @@ function openRecipeModal(editData = null) {
         }));
 
         try {
-        let recipeId;
-        if (editingRecipeId) {
-            // Cập nhật recipe
-            await updateRecipe(editingRecipeId, {
-                name, flower_type, creator_id: 2, creator_name, description,
-                status: 'active', created_date
-            });
-            recipeId = editingRecipeId;
-            // Xóa stages cũ
-            const oldStages = await getStages(recipeId);
-            for (let st of oldStages) {
-                await deleteStage(st.id);
+            let recipeId;
+            if (editingRecipeId) {
+                // Cập nhật recipe
+                await updateRecipe(editingRecipeId, {
+                    name, flower_type, creator_id: 2, creator_name, description,
+                    status: 'active', created_date
+                });
+                recipeId = editingRecipeId;
+                // Xóa stages cũ
+                const oldStages = await getStages(recipeId);
+                for (let st of oldStages) {
+                    await deleteStage(st.id);
+                }
+            } else {
+                // Thêm mới recipe
+                const newRecipe = await createRecipe({
+                    name, flower_type, creator_id: 2, creator_name,
+                    description, status: 'active', created_date
+                });
+                recipeId = newRecipe.id;
+                recipes.push(newRecipe);
             }
-        } else {
-            // Thêm mới recipe
-            const newRecipe = await createRecipe({
-                name, flower_type, creator_id: 2, creator_name,
-                description, status: 'active', created_date
-            });
-            recipeId = newRecipe.id;
-            recipes.push(newRecipe);
-        }
 
-        // Tạo stages mới
-        for (let stage of stages) {
-            await createStage(recipeId, stage);
-        }
+            // Tạo stages mới
+            for (let stage of stages) {
+                await createStage(recipeId, stage);
+            }
 
-        closeModal('recipe-modal');
-        document.getElementById('recipe-modal').remove();
-        // Reload data
-        await loadRecipes();
-        await renderGrowth();
-        showToast(editingRecipeId ? 'Đã cập nhật công thức' : 'Đã thêm công thức mới', 'success');
+            closeModal('recipe-modal');
+            document.getElementById('recipe-modal').remove();
+            // Reload data
+            await loadRecipes();
+            await renderGrowth();
+            showToast(editingRecipeId ? 'Đã cập nhật công thức' : 'Đã thêm công thức mới', 'success');
         } catch (err) {
             showToast('Lỗi lưu: ' + err.message, 'error');
         }

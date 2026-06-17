@@ -36,6 +36,15 @@ async function loadDashboardData() {
             getZones()
         ]);
         greenhouses = getGreenhouses(zones);
+        // Đảm bảo currentGreenhouseId vẫn hợp lệ sau khi load
+        if (greenhouses.length > 0) {
+            const saved = localStorage.getItem('selectedGreenhouse');
+            if (saved && greenhouses.some(g => String(g.id) === String(saved))) {
+                currentGreenhouseId = String(saved);
+            } else if (!currentGreenhouseId || !greenhouses.some(g => String(g.id) === String(currentGreenhouseId))) {
+                currentGreenhouseId = String(greenhouses[0].id);
+            }
+        }
     } catch (err) {
         console.error('Lỗi load dashboard data:', err);
         throw err;
@@ -48,7 +57,7 @@ function getZonesByGreenhouse(greenhouseId) {
     function traverse(nodes) {
         for (const node of nodes) {
             if (node.type === 'zone') {
-                const ghId = getGreenhouseIdByZoneId(node.id);
+                const ghId = getGreenhouseIdByZoneId(node.id, zones); // truyền zones vào
                 if (ghId === greenhouseId) {
                     result.push(node);
                 }
@@ -62,7 +71,8 @@ function getZonesByGreenhouse(greenhouseId) {
 
 // ===================== TÍNH TOÁN DỮ LIỆU THỐNG KÊ =====================
 function getStatsForGreenhouse(greenhouseId) {
-    const zoneList = getZonesByGreenhouse(greenhouseId);
+    const ghId = String(greenhouseId);
+    const zoneList = getZonesByGreenhouse(ghId);
     const zoneIds = zoneList.map(z => z.id);
 
     // Thiết bị
@@ -88,7 +98,7 @@ function getStatsForGreenhouse(greenhouseId) {
         avgTemp = zonesWithTemp.reduce((sum, z) => sum + z.temperature, 0) / zonesWithTemp.length;
         avgHum = zonesWithTemp.reduce((sum, z) => sum + z.humidity, 0) / zonesWithTemp.length;
     } else {
-        const seed = greenhouseId.length + greenhouseId.charCodeAt(0);
+        const seed = ghId.length + ghId.charCodeAt(0);
         avgTemp = 20 + (seed % 8) + Math.random() * 2;
         avgHum = 60 + (seed % 25) + Math.random() * 5;
     }
@@ -110,8 +120,17 @@ function getStatsForGreenhouse(greenhouseId) {
 
 // ===================== DỮ LIỆU BIỂU ĐỒ =====================
 function getChartData(greenhouseId) {
-    const seed = greenhouseId.length + greenhouseId.charCodeAt(0);
-    const rand = (min, max) => Math.random() * (max - min) + min;
+    const ghId = String(greenhouseId);
+    const seed = ghId.length + ghId.charCodeAt(0);
+    const rand = (min, max) => {
+        // Dùng seed để tạo số ngẫu nhiên nhất quán
+        let s = seed;
+        return function() {
+            s = (s * 9301 + 49297) % 233280;
+            const rnd = s / 233280;
+            return rnd * (max - min) + min;
+        };
+    };
     const labels = generateTimeLabels();
     const baseTemp = 20 + (seed % 8);
     const tempData = labels.map(() => baseTemp + rand(-3, 3));
@@ -261,12 +280,9 @@ export async function renderDashboardPage() {
         return;
     }
 
-    // Lấy greenhouse đã chọn
-    const saved = localStorage.getItem('selectedGreenhouse');
-    if (saved && greenhouses.find(g => g.id === saved)) {
-        currentGreenhouseId = saved;
-    } else if (!currentGreenhouseId) {
-        currentGreenhouseId = greenhouses[0].id;
+    // Đảm bảo currentGreenhouseId hợp lệ
+    if (!currentGreenhouseId || !greenhouses.some(g => String(g.id) === String(currentGreenhouseId))) {
+        currentGreenhouseId = String(greenhouses[0].id);
     }
 
     const stats = getStatsForGreenhouse(currentGreenhouseId);
@@ -281,8 +297,8 @@ export async function renderDashboardPage() {
             </div>
             <div style="position: absolute; top: 0; right: 0;">
                 <label style="font-size:0.85rem; color:#6b7280; margin-right:8px;">🏠 Nhà kính:</label>
-                <select id="greenhouse-select" class="form-select" style="width:auto; display:inline-block;">
-                    ${greenhouses.map(gh => `<option value="${gh.id}" ${gh.id === currentGreenhouseId ? 'selected' : ''}>${gh.name}</option>`).join('')}
+                <select id="greenhouse-select" class="form-select" style="width:auto; display:inline-block;" aria-label="Chọn nhà kính">
+                    ${greenhouses.map(gh => `<option value="${gh.id}" ${String(gh.id) === String(currentGreenhouseId) ? 'selected' : ''}>${gh.name}</option>`).join('')}
                 </select>
             </div>
         </div>
@@ -353,9 +369,12 @@ export async function renderDashboardPage() {
 
     // Sự kiện đổi greenhouse
     const select = document.getElementById('greenhouse-select');
-    select.addEventListener('change', (e) => {
+    // Xóa event cũ để tránh duplicate
+    select.replaceWith(select.cloneNode(true));
+    const newSelect = document.getElementById('greenhouse-select');
+    newSelect.addEventListener('change', (e) => {
         const newId = e.target.value;
-        currentGreenhouseId = newId;
+        currentGreenhouseId = String(newId);
         localStorage.setItem('selectedGreenhouse', newId);
         renderDashboardPage();
     });

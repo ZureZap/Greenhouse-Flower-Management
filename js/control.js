@@ -6,8 +6,8 @@
  */
 
 import { showToast } from './app.js';
-import { getDevices, getControlProperties, updateControlProperty } from './api.js';
-import { getGreenhouses, getGreenhouseIdByZoneId, getZoneName, getTimeRemaining, getZones } from './utils.js';
+import { getDevices, getControlProperties, updateControlProperty, getZones } from './api.js';
+import { getGreenhouses, getGreenhouseIdByZoneId, getZoneName, getTimeRemaining } from './utils.js';
 
 // ===================== BIẾN TOÀN CỤC =====================
 let filterGreenhouseId = null;

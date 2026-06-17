@@ -5,13 +5,12 @@
  */
 
 import { showToast } from './app.js';
-import { getAlerts, updateAlertStatus, deleteAlert } from './api.js';
+import { getAlerts, updateAlertStatus, deleteAlert, getZones } from './api.js';
 import {
     getGreenhouses,
     getGreenhouseIdByZoneId,
     getZoneName,
-    timeSince,
-    getZones
+    timeSince
 } from './utils.js';
 
 // ===================== BIẾN TOÀN CỤC =====================

@@ -197,15 +197,15 @@ app.get('/api/greenhouses/:farmId', async (req, res) => {
 app.get('/api/zones', async (req, res) => {
     try {
         const pool = await getConnection();
-        // CTE đệ quy để xây dựng cây zones (Farm → Greenhouse → Zone)
+        // Dùng CAST ở phần Anchor để đồng bộ kiểu dữ liệu (NVARCHAR(20) và INT)
         const result = await pool.request().query(`
             WITH ZoneTree AS (
-                -- Lấy tất cả Farm (root)
+                -- Lấy tất cả Farm (root) - Ép kiểu rõ ràng ở đây
                 SELECT 
                     farm_id AS id,
                     farm_name AS name,
-                    'farm' AS type,
-                    NULL AS parent_id,
+                    CAST('farm' AS NVARCHAR(20)) AS type,
+                    CAST(NULL AS INT) AS parent_id,
                     0 AS level,
                     CAST(farm_id AS NVARCHAR(MAX)) AS path
                 FROM Farm
@@ -214,7 +214,7 @@ app.get('/api/zones', async (req, res) => {
                 SELECT 
                     greenhouse_id AS id,
                     greenhouse_name AS name,
-                    'greenhouse' AS type,
+                    CAST('greenhouse' AS NVARCHAR(20)) AS type,
                     farm_id AS parent_id,
                     level + 1,
                     path + ':' + CAST(greenhouse_id AS NVARCHAR(10))
@@ -225,7 +225,7 @@ app.get('/api/zones', async (req, res) => {
                 SELECT 
                     zone_id AS id,
                     zone_name AS name,
-                    'zone' AS type,
+                    CAST('zone' AS NVARCHAR(20)) AS type,
                     greenhouse_id AS parent_id,
                     level + 1,
                     path + ':' + CAST(zone_id AS NVARCHAR(10))
@@ -237,6 +237,7 @@ app.get('/api/zones', async (req, res) => {
         // Trả về danh sách flat, front-end sẽ parse thành cây
         res.json(result.recordset);
     } catch (err) {
+        console.error('GET /api/zones error:', err);
         res.status(500).json({ error: err.message });
     }
 });

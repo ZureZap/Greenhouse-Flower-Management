@@ -1,4 +1,4 @@
-import { login as apiLogin, register as apiRegister, getCurrentUser, logout as apiLogout } from './api.js';
+import { login as apiLogin, register as apiRegister, logout as apiLogout } from './api.js';
 import { showToast } from './app.js';
 
 // Đăng nhập

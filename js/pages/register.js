@@ -8,27 +8,27 @@ export function renderRegisterPage() {
             <div class="card" style="width:450px;">
                 <div class="card-title" style="text-align:center">📝 Đăng ký</div>
                 <div class="form-group">
-                    <label class="form-label">Tên đăng nhập</label>
-                    <input class="form-input" id="reg-username">
+                    <label class="form-label" for="reg-username">Tên đăng nhập</label>
+                    <input class="form-input" id="reg-username" placeholder="Nhập tên đăng nhập">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Email</label>
-                    <input class="form-input" id="reg-email" type="email">
+                    <label class="form-label" for="reg-email">Email</label>
+                    <input class="form-input" id="reg-email" type="email" placeholder="Nhập địa chỉ email">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Số điện thoại</label>
-                    <input class="form-input" id="reg-phone">
+                    <label class="form-label" for="reg-phone">Số điện thoại</label>
+                    <input class="form-input" id="reg-phone" placeholder="Nhập số điện thoại">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Mật khẩu</label>
-                    <input class="form-input" id="reg-password" type="password">
+                    <label class="form-label" for="reg-password">Mật khẩu</label>
+                    <input class="form-input" id="reg-password" type="password" placeholder="Nhập mật khẩu">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Xác nhận mật khẩu</label>
-                    <input class="form-input" id="reg-confirm" type="password">
+                    <label class="form-label" for="reg-confirm">Xác nhận mật khẩu</label>
+                    <input class="form-input" id="reg-confirm" type="password" placeholder="Nhập lại mật khẩu">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Vai trò</label>
+                    <label class="form-label" for="reg-role">Vai trò</label>
                     <select class="form-select" id="reg-role">
                         <option value="OPERATOR">Nhân viên vận hành</option>
                         <option value="TECHNICIAN">Kỹ thuật viên</option>

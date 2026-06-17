@@ -225,6 +225,7 @@ tr:hover td {
     display: inline-block;
     width: 20px;
     text-align: center;
+    -webkit-user-select: none;
     user-select: none;
 }
 .empty-detail {

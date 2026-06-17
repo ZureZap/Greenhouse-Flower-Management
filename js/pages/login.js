@@ -8,12 +8,12 @@ export function renderLoginPage() {
             <div class="card" style="width:400px;">
                 <div class="card-title" style="text-align:center">🔐 Đăng nhập</div>
                 <div class="form-group">
-                    <label class="form-label">Tên đăng nhập / Email</label>
-                    <input class="form-input" id="login-username" type="text">
+                    <label class="form-label" for="login-username">Tên đăng nhập / Email</label>
+                    <input class="form-input" id="login-username" type="text" placeholder="Nhập tài khoản hoặc email">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Mật khẩu</label>
-                    <input class="form-input" id="login-password" type="password">
+                    <label class="form-label" for="login-password">Mật khẩu</label>
+                    <input class="form-input" id="login-password" type="password" placeholder="Nhập mật khẩu">
                 </div>
                 <div class="modal-actions" style="justify-content:space-between">
                     <button class="btn btn-outline" id="goto-register">Đăng ký</button>
