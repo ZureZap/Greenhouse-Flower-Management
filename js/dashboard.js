@@ -6,7 +6,7 @@
  */
 
 import { getGreenhouses, getGreenhouseIdByZoneId, getZoneName, getZoneById } from './utils.js';
-import { getDevices, getAlerts, getGreenhouseStats, getGlobalStats, getZones } from './api.js';
+import { getDevices, getAlerts, getSensorData, getZones } from './api.js';
 
 // --- Biến toàn cục ---
 let areaChart, radarChart, lineChart;
@@ -15,6 +15,7 @@ let greenhouses = [];
 let devices = [];
 let alerts = [];
 let zones = [];
+let sensorData = [];
 
 /**
  * Tạo nhãn thời gian cho 24 giờ (dựa trên giờ hiện tại, quay ngược 23 giờ)
@@ -44,6 +45,7 @@ async function loadDashboardData() {
             } else if (!currentGreenhouseId || !greenhouses.some(g => String(g.id) === String(currentGreenhouseId))) {
                 currentGreenhouseId = String(greenhouses[0].id);
             }
+            sensorData = await getSensorData(currentGreenhouseId);
         }
     } catch (err) {
         console.error('Lỗi load dashboard data:', err);
@@ -58,7 +60,7 @@ function getZonesByGreenhouse(greenhouseId) {
         for (const node of nodes) {
             if (node.type === 'zone') {
                 const ghId = getGreenhouseIdByZoneId(node.id, zones); // truyền zones vào
-                if (ghId === greenhouseId) {
+                if (String(ghId) === String(greenhouseId)) {
                     result.push(node);
                 }
             }
@@ -73,20 +75,20 @@ function getZonesByGreenhouse(greenhouseId) {
 function getStatsForGreenhouse(greenhouseId) {
     const ghId = String(greenhouseId);
     const zoneList = getZonesByGreenhouse(ghId);
-    const zoneIds = zoneList.map(z => z.id);
+    const zoneIds = zoneList.map(z => String(z.id));
 
     // Thiết bị
-    const devsInGh = devices.filter(d => zoneIds.includes(d.zone_id));
+    const devsInGh = devices.filter(d => zoneIds.includes(String(d.zone_id)));
     const totalDevices = devsInGh.length;
-    const activeDevices = devsInGh.filter(d => d.status === 'ACTIVE').length;
+    const activeDevices = devsInGh.filter(d => d.status === 'ONLINE').length;
     const offlineDevices = devsInGh.filter(d => d.status === 'OFFLINE').length;
     const needReplace = devsInGh.filter(d => d.status === 'NEEDS_REPLACEMENT').length;
 
     // Cảnh báo
-    const alertsInGh = alerts.filter(a => zoneIds.includes(a.zone_id));
-    const criticalAlerts = alertsInGh.filter(a => a.severity === 'critical' && a.status === 'active').length;
-    const warningAlerts = alertsInGh.filter(a => a.severity === 'warning' && a.status === 'active').length;
-    const infoAlerts = alertsInGh.filter(a => a.severity === 'info' && a.status === 'active').length;
+    const alertsInGh = alerts.filter(a => zoneIds.includes(String(a.zone_id)));
+    const criticalAlerts = alertsInGh.filter(a => a.severity === 'critical' && a.status !== 'resolved').length;
+    const warningAlerts = alertsInGh.filter(a => a.severity === 'warning' && a.status !== 'resolved').length;
+    const infoAlerts = alertsInGh.filter(a => a.severity === 'info' && a.status !== 'resolved').length;
 
     // Zone đang trồng
     const zonesWithRecipe = zoneList.filter(z => z.recipe_id);
@@ -97,10 +99,6 @@ function getStatsForGreenhouse(greenhouseId) {
     if (zonesWithTemp.length > 0) {
         avgTemp = zonesWithTemp.reduce((sum, z) => sum + z.temperature, 0) / zonesWithTemp.length;
         avgHum = zonesWithTemp.reduce((sum, z) => sum + z.humidity, 0) / zonesWithTemp.length;
-    } else {
-        const seed = ghId.length + ghId.charCodeAt(0);
-        avgTemp = 20 + (seed % 8) + Math.random() * 2;
-        avgHum = 60 + (seed % 25) + Math.random() * 5;
     }
 
     return {
@@ -120,28 +118,20 @@ function getStatsForGreenhouse(greenhouseId) {
 
 // ===================== DỮ LIỆU BIỂU ĐỒ =====================
 function getChartData(greenhouseId) {
-    const ghId = String(greenhouseId);
-    const seed = ghId.length + ghId.charCodeAt(0);
-    const rand = (min, max) => {
-        // Dùng seed để tạo số ngẫu nhiên nhất quán
-        let s = seed;
-        return function() {
-            s = (s * 9301 + 49297) % 233280;
-            const rnd = s / 233280;
-            return rnd * (max - min) + min;
-        };
+    const rows = sensorData.filter(row => String(row.greenhouseId) === String(greenhouseId));
+    const timestamps = [...new Set(rows.map(row => new Date(row.timestamp).getTime()))].sort((a, b) => a - b);
+    const labels = timestamps.map(ts => new Date(ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+    const series = metric => timestamps.map(ts => {
+        const row = rows.find(item => new Date(item.timestamp).getTime() === ts && item.metricType === metric);
+        return row ? Number(row.value) : null;
+    });
+    return {
+        labels,
+        tempData: series('Temperature'),
+        humData: series('Humidity'),
+        lightData: series('Light'),
+        co2Data: series('CO2')
     };
-    const labels = generateTimeLabels();
-    const baseTemp = 20 + (seed % 8);
-    const tempData = labels.map(() => baseTemp + rand(-3, 3));
-    const baseHum = 60 + (seed % 25);
-    const humData = labels.map(() => baseHum + rand(-10, 10));
-    const baseLight = 300 + (seed % 200);
-    const lightData = labels.map(() => baseLight + rand(-100, 100));
-    const baseCo2 = 400 + (seed % 100);
-    const co2Data = labels.map(() => baseCo2 + rand(-50, 50));
-
-    return { tempData, humData, lightData, co2Data };
 }
 
 // ===================== BIỂU ĐỒ =====================
@@ -152,7 +142,7 @@ function destroyCharts() {
 }
 
 function initCharts(data, stats) {
-    const labels = generateTimeLabels();
+    const labels = data.labels;
     const { tempData, humData, lightData, co2Data } = data;
 
     // 1. Area chart
@@ -195,9 +185,10 @@ function initCharts(data, stats) {
         const norm = (val, min, max) => Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
         const tempScore = norm(avgTemp, 15, 35);
         const humScore = norm(avgHum, 40, 90);
-        const lightScore = 65 + Math.random() * 20;
-        const co2Score = 70 + Math.random() * 15;
-        const phScore = 70 + Math.random() * 20;
+        const latest = metric => [...sensorData].reverse().find(row => row.metricType === metric)?.value;
+        const lightScore = norm(Number(latest('Light') || 0), 0, 1000);
+        const co2Score = norm(Number(latest('CO2') || 0), 300, 1200);
+        const phScore = norm(Number(latest('PH') || 0), 4, 9);
 
         radarChart = new Chart(radarCtx, {
             type: 'radar',

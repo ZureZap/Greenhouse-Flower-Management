@@ -28,21 +28,21 @@ function zoneTypeName(type) {
 
 function statusChip(status) {
     if (!status) return '';
-    const classMap = { optimal: 'chip-success', high: 'chip-warning', normal: 'chip-default' };
-    const labelMap = { optimal: 'Tối ưu', high: 'Cao', normal: 'Bình thường' };
+    const classMap = { optimal: 'chip-success', warning: 'chip-warning', high: 'chip-warning', normal: 'chip-default', inactive: 'chip-default' };
+    const labelMap = { optimal: 'Tối ưu', warning: 'Cảnh báo', high: 'Cao', normal: 'Bình thường', inactive: 'Chưa hoạt động' };
     return `<span class="chip ${classMap[status] || 'chip-default'}">${labelMap[status] || status}</span>`;
 }
 
 // ===================== TÌM KIẾM =====================
 function filterNodesByName(nodes, keyword) {
-    return nodes.filter(node => {
-        if (node.name.toLowerCase().includes(keyword.toLowerCase())) return true;
-        if (node.children) {
-            node.children = filterNodesByName(node.children, keyword);
-            return node.children.length > 0;
+    const normalizedKeyword = keyword.toLowerCase();
+    return nodes.reduce((result, node) => {
+        const children = node.children ? filterNodesByName(node.children, keyword) : [];
+        if (node.name.toLowerCase().includes(normalizedKeyword) || children.length > 0) {
+            result.push({ ...node, children });
         }
-        return false;
-    });
+        return result;
+    }, []);
 }
 
 // ===================== XÂY DỰNG CÂY =====================
@@ -50,9 +50,9 @@ function buildTreeHtml(nodes, keyword = '', level = 0) {
     const filtered = keyword ? filterNodesByName(nodes, keyword) : nodes;
     return filtered.map(node => {
         const hasChildren = node.children && node.children.length > 0;
-        const isExpanded = zoneExpanded[node.id];
+        const isExpanded = zoneExpanded[node._key];
         const indent = level * 20;
-        const isSelected = selectedZone?.id === node.id;
+        const isSelected = selectedZone?._key === node._key;
 
         if (keyword && !node.name.toLowerCase().includes(keyword.toLowerCase()) && hasChildren) {
             const childMatch = filterNodesByName(node.children, keyword).length > 0;
@@ -60,10 +60,10 @@ function buildTreeHtml(nodes, keyword = '', level = 0) {
         }
 
         return `
-            <div class="zone-tree-node" data-zone-id="${node.id}">
+            <div class="zone-tree-node" data-zone-key="${node._key}">
                 <div class="tree-item${isSelected ? ' selected' : ''}" style="padding-left: ${12 + indent}px">
                     ${hasChildren
-                        ? `<span class="tree-toggle" data-toggle-id="${node.id}">${isExpanded ? '▼' : '▶'}</span>`
+                        ? `<span class="tree-toggle" data-toggle-key="${node._key}">${isExpanded ? '▼' : '▶'}</span>`
                         : '<span style="width:20px;display:inline-block"></span>'}
                     <span class="zone-icon">${zoneIcon(node.type)}</span>
                     <span class="zone-name">${node.name}</span>
@@ -117,19 +117,18 @@ function renderZoneDetail() {
                 <div class="detail-type">${zoneTypeName(zone.type)}</div>
             </div>
             <div class="detail-actions">
-                <button class="btn-icon edit-zone" data-id="${zone.id}" title="Sửa">✏️</button>
-                <button class="btn-icon delete-zone" data-id="${zone.id}" title="Xóa">🗑️</button>
+                <button class="btn-icon edit-zone" data-key="${zone._key}" title="Sửa">✏️</button>
+                <button class="btn-icon delete-zone" data-key="${zone._key}" title="Xóa">🗑️</button>
             </div>
         </div>
     `;
 
     if (zone.type === 'zone') {
-        const recipes = getRecipeList();
-        const currentRecipe = recipes.find(r => r.id === zone.recipe_id);
+        const currentRecipe = recipesCache.find(r => String(r.id) === String(zone.recipe_id));
         html += `
             <div class="grid grid-2 zone-metrics">
-                <div class="metric-card temp">🌡️ Nhiệt độ: <strong>${zone.temperature || '--'}°C</strong></div>
-                <div class="metric-card hum">💧 Độ ẩm: <strong>${zone.humidity || '--'}%</strong></div>
+                <div class="metric-card temp">🌡️ Nhiệt độ: <strong>${zone.temperature ?? '--'}°C</strong></div>
+                <div class="metric-card hum">💧 Độ ẩm: <strong>${zone.humidity ?? '--'}%</strong></div>
             </div>
             <div style="margin-bottom:12px;">
                 <div><strong>Công thức áp dụng:</strong> ${currentRecipe ? currentRecipe.name : 'Chưa có'}</div>
@@ -147,8 +146,8 @@ function renderZoneDetail() {
                     <div><span class="child-icon">${zoneIcon(child.type)}</span> ${child.name}</div>
                     ${child.devices ? `<div class="child-devices">📟 ${child.devices} thiết bị</div>` : ''}
                     <div class="child-actions">
-                        <button class="btn-icon edit-child" data-id="${child.id}" title="Sửa">✏️</button>
-                        <button class="btn-icon delete-child" data-id="${child.id}" title="Xóa">🗑️</button>
+                        <button class="btn-icon edit-child" data-key="${child._key}" title="Sửa">✏️</button>
+                        <button class="btn-icon delete-child" data-key="${child._key}" title="Xóa">🗑️</button>
                     </div>
                 </div>
             `;
@@ -174,14 +173,13 @@ function attachDetailEvents() {
 }
 
 function handleEditClick(e) {
-    const id = e.currentTarget.getAttribute('data-id');
-    openZoneModal(id);
+    openZoneModal(e.currentTarget.getAttribute('data-key'));
 }
 
 function handleDeleteClick(e) {
-    const id = e.currentTarget.getAttribute('data-id');
+    const key = e.currentTarget.getAttribute('data-key');
     if (confirm('Xóa vùng này sẽ xóa tất cả vùng con và thiết bị bên trong. Bạn có chắc?')) {
-        deleteZoneById(id);
+        deleteZoneById(key);
     }
 }
 
@@ -196,15 +194,19 @@ async function loadZones() {
         
         // Tạo map lưu các node
         flatZones.forEach(node => {
-            map[node.id] = { ...node, children: [] };
+            const key = `${node.type}:${node.id}`;
+            map[key] = { ...node, _key: key, children: [] };
         });
         
         // Gắn node con vào node cha
         flatZones.forEach(node => {
-            if (node.parent_id !== null && map[node.parent_id]) {
-                map[node.parent_id].children.push(map[node.id]);
+            const key = `${node.type}:${node.id}`;
+            const parentType = node.type === 'greenhouse' ? 'farm' : node.type === 'zone' ? 'greenhouse' : null;
+            const parentKey = parentType && node.parent_id !== null ? `${parentType}:${node.parent_id}` : null;
+            if (parentKey && map[parentKey]) {
+                map[parentKey].children.push(map[key]);
             } else {
-                tree.push(map[node.id]);
+                tree.push(map[key]);
             }
         });
         
@@ -267,60 +269,51 @@ export async function renderZonesPage() {
     document.getElementById('zone-tree')?.addEventListener('click', (e) => {
         const toggle = e.target.closest('.tree-toggle');
         if (toggle) {
-            const id = toggle.getAttribute('data-toggle-id');
-            if (id) toggleZoneExpand(id);
+            const key = toggle.getAttribute('data-toggle-key');
+            if (key) toggleZoneExpand(key);
             return;
         }
         const nodeDiv = e.target.closest('.zone-tree-node');
         if (nodeDiv) {
-            const id = nodeDiv.getAttribute('data-zone-id');
-            if (id) selectZone(id);
+            const key = nodeDiv.getAttribute('data-zone-key');
+            if (key) selectZone(key);
         }
     });
 }
 
 // ===================== EXPAND / SELECT =====================
-export function toggleZoneExpand(id) {
-    zoneExpanded[id] = !zoneExpanded[id];
+export function toggleZoneExpand(key) {
+    zoneExpanded[key] = !zoneExpanded[key];
     renderZoneTree();
     renderZoneDetail();
 }
 
-export function selectZone(id) {
+export function selectZone(key) {
     // Tìm zone trong cây
-    function findNode(nodes, targetId) {
+    function findNode(nodes, targetKey) {
         for (const node of nodes) {
-            if (node.id === targetId) return node;
+            if (node._key === targetKey) return node;
             if (node.children) {
-                const found = findNode(node.children, targetId);
+                const found = findNode(node.children, targetKey);
                 if (found) return found;
             }
         }
         return null;
     }
-    const zone = findNode(zones, id);
+    const zone = findNode(zones, key);
     if (zone) selectedZone = zone;
     renderZoneDetail();
 }
 
 // ===================== CRUD =====================
-async function deleteZoneById(id) {
+async function deleteZoneById(key) {
     try {
-        await deleteZone(id);
-        // Cập nhật lại cây (xóa đệ quy)
-        function removeNode(nodes, targetId) {
-            for (let i = 0; i < nodes.length; i++) {
-                if (nodes[i].id === targetId) {
-                    nodes.splice(i, 1);
-                    return true;
-                }
-                if (nodes[i].children && removeNode(nodes[i].children, targetId)) return true;
-            }
-            return false;
-        }
-        removeNode(zones, id);
-        if (selectedZone?.id === id) selectedZone = null;
-        delete zoneExpanded[id];
+        const target = findNodeById(zones, key);
+        if (!target) return;
+        await deleteZone(target.id, target.type);
+        selectedZone = null;
+        delete zoneExpanded[key];
+        await loadZones();
         renderZones();
         showToast('Đã xóa vùng', 'info');
     } catch (err) {
@@ -333,32 +326,11 @@ async function saveZone(zoneData) {
         const { id, name, type, parentId, greenhouse_id, recipe_id, start_date, temperature, humidity, status } = zoneData;
         if (id) {
             // Sửa
-            await updateZone(id, { name, type, greenhouse_id, recipe_id, start_date, temperature, humidity, status });
-            // Cập nhật trong cây
-            function updateNode(nodes) {
-                for (const node of nodes) {
-                    if (node.id === id) {
-                        node.name = name;
-                        node.type = type;
-                        if (type === 'zone') {
-                            node.greenhouse_id = greenhouse_id;
-                            node.recipe_id = recipe_id;
-                            node.start_date = start_date;
-                            node.temperature = temperature;
-                            node.humidity = humidity;
-                            node.status = status;
-                        }
-                        return true;
-                    }
-                    if (node.children && updateNode(node.children)) return true;
-                }
-                return false;
-            }
-            updateNode(zones);
+            await updateZone(id, { name, type, parent_id: parentId, greenhouse_id, recipe_id, start_date, temperature, humidity, status });
             showToast('Đã cập nhật vùng');
         } else {
             // Thêm mới
-            const newZone = await createZone({
+            await createZone({
                 name,
                 type,
                 parent_id: parentId,
@@ -369,27 +341,20 @@ async function saveZone(zoneData) {
                 humidity: type === 'zone' ? humidity : undefined,
                 status: type === 'zone' ? status : undefined
             });
-            // Thêm vào cây
-            const parent = parentId ? findNodeById(zones, parentId) : null;
-            if (parent) {
-                if (!parent.children) parent.children = [];
-                parent.children.push(newZone);
-            } else {
-                zones.push(newZone);
-            }
             showToast('Đã thêm vùng mới');
         }
+        await loadZones();
         await renderZones();
     } catch (err) {
         showToast('Lỗi lưu vùng: ' + err.message, 'error');
     }
 }
 
-function findNodeById(nodes, id) {
+function findNodeById(nodes, key) {
     for (const node of nodes) {
-        if (node.id === id) return node;
+        if (node._key === key) return node;
         if (node.children) {
-            const found = findNodeById(node.children, id);
+            const found = findNodeById(node.children, key);
             if (found) return found;
         }
     }
@@ -397,19 +362,19 @@ function findNodeById(nodes, id) {
 }
 
 // ===================== MODAL THÊM/SỬA =====================
-function findParentId(nodes, childId) {
+function findParentId(nodes, childKey) {
     for (const node of nodes) {
-        if (node.children && node.children.some(c => c.id === childId)) return node.id;
+        if (node.children && node.children.some(c => c._key === childKey)) return node._key;
         if (node.children) {
-            const found = findParentId(node.children, childId);
+            const found = findParentId(node.children, childKey);
             if (found) return found;
         }
     }
     return null;
 }
 
-async function openZoneModal(editId = null) {
-    const zone = editId ? findNodeById(zones, editId) : null;
+async function openZoneModal(editKey = null) {
+    const zone = editKey ? findNodeById(zones, editKey) : null;
     const title = zone ? 'Sửa vùng' : 'Thêm vùng mới';
 
     // Lấy danh sách greenhouse từ cây zones
@@ -432,14 +397,14 @@ async function openZoneModal(editId = null) {
     function collectParents(nodes, level = 0) {
         for (const node of nodes) {
             if (node.type !== 'rack') {
-                parentOptions.push({ id: node.id, name: '　'.repeat(level) + node.name });
+                parentOptions.push({ id: node._key, entityId: node.id, name: '　'.repeat(level) + node.name });
                 if (node.children) collectParents(node.children, level + 1);
             }
         }
     }
     collectParents(zones);
 
-    const parentId = zone ? findParentId(zones, zone.id) : null;
+    const parentId = zone ? findParentId(zones, zone._key) : null;
 
     const modalHtml = `
         <div class="modal-overlay" id="zone-crud-modal">
@@ -451,11 +416,10 @@ async function openZoneModal(editId = null) {
                 </div>
                 <div class="form-group">
                     <label class="form-label">Loại vùng</label>
-                    <select class="form-select" id="zone-type">
+                    <select class="form-select" id="zone-type" ${zone ? 'disabled' : ''}>
                         <option value="farm" ${zone?.type === 'farm' ? 'selected' : ''}>Khu trại</option>
                         <option value="greenhouse" ${zone?.type === 'greenhouse' ? 'selected' : ''}>Nhà kính</option>
                         <option value="zone" ${zone?.type === 'zone' ? 'selected' : ''}>Khu vực</option>
-                        <option value="rack" ${zone?.type === 'rack' ? 'selected' : ''}>Giàn trồng</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -497,6 +461,8 @@ async function openZoneModal(editId = null) {
                         <select class="form-select" id="zone-status">
                             <option value="optimal" ${zone?.status === 'optimal' ? 'selected' : ''}>Tối ưu</option>
                             <option value="normal" ${zone?.status === 'normal' ? 'selected' : ''}>Bình thường</option>
+                            <option value="warning" ${zone?.status === 'warning' ? 'selected' : ''}>Cảnh báo</option>
+                            <option value="inactive" ${zone?.status === 'inactive' ? 'selected' : ''}>Chưa hoạt động</option>
                             <option value="high" ${zone?.status === 'high' ? 'selected' : ''}>Cao</option>
                         </select>
                     </div>
@@ -523,7 +489,9 @@ async function openZoneModal(editId = null) {
     const saveHandler = async () => {
         const name = document.getElementById('zone-name').value.trim();
         const type = typeSelect.value;
-        const parentId = document.getElementById('zone-parent').value || null;
+        const parentKey = document.getElementById('zone-parent').value || null;
+        const parentNode = parentKey ? findNodeById(zones, parentKey) : null;
+        const parentId = parentNode?.id || null;
         if (!name) {
             showToast('Vui lòng nhập tên vùng', 'warning');
             return;

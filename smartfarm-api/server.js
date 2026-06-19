@@ -36,7 +36,7 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(403).json({ error: 'Tài khoản chưa được phê duyệt' });
         }
         // Tạo token giả (trong thực tế nên dùng JWT)
-        const token = 'fake-jwt-token-' + Date.now();
+        const token = 'demo-token-' + user.id;
         res.json({ ...user, token });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -61,7 +61,7 @@ app.post('/api/auth/register', async (req, res) => {
             .input('password', sql.NVarChar, password)
             .input('email', sql.NVarChar, email)
             .input('phone', sql.NVarChar, phone)
-            .input('role', sql.NVarChar, role || 'Nhân viên vận hành')
+            .input('role', sql.NVarChar, role || 'OPERATOR')
             .query(`
                 INSERT INTO [User] (user_name, password, email, phone_number, role, status)
                 OUTPUT INSERTED.user_id AS id, INSERTED.user_name AS username, INSERTED.email, INSERTED.phone_number, INSERTED.role, INSERTED.status
@@ -202,37 +202,55 @@ app.get('/api/zones', async (req, res) => {
             WITH ZoneTree AS (
                 -- Lấy tất cả Farm (root) - Ép kiểu rõ ràng ở đây
                 SELECT 
-                    farm_id AS id,
-                    farm_name AS name,
+                    f.farm_id AS id,
+                    f.farm_name AS name,
                     CAST('farm' AS NVARCHAR(20)) AS type,
                     CAST(NULL AS INT) AS parent_id,
+                    CAST(NULL AS INT) AS recipe_id,
+                    CAST(NULL AS DATE) AS start_date,
+                    CAST(NULL AS DECIMAL(5,2)) AS temperature,
+                    CAST(NULL AS INT) AS humidity,
+                    CAST(NULL AS NVARCHAR(20)) AS status,
                     0 AS level,
-                    CAST(farm_id AS NVARCHAR(MAX)) AS path
-                FROM Farm
+                    CAST(f.farm_id AS NVARCHAR(MAX)) AS path
+                FROM Farm f
                 UNION ALL
                 -- Greenhouse
                 SELECT 
-                    greenhouse_id AS id,
-                    greenhouse_name AS name,
+                    g.greenhouse_id AS id,
+                    g.greenhouse_name AS name,
                     CAST('greenhouse' AS NVARCHAR(20)) AS type,
-                    farm_id AS parent_id,
-                    level + 1,
-                    path + ':' + CAST(greenhouse_id AS NVARCHAR(10))
+                    g.farm_id AS parent_id,
+                    CAST(NULL AS INT) AS recipe_id,
+                    CAST(NULL AS DATE) AS start_date,
+                    CAST(NULL AS DECIMAL(5,2)) AS temperature,
+                    CAST(NULL AS INT) AS humidity,
+                    CAST(NULL AS NVARCHAR(20)) AS status,
+                    zt.level + 1,
+                    zt.path + ':' + CAST(g.greenhouse_id AS NVARCHAR(10))
                 FROM Greenhouse g
                 INNER JOIN ZoneTree zt ON g.farm_id = zt.id AND zt.type = 'farm'
                 UNION ALL
                 -- Zone
                 SELECT 
-                    zone_id AS id,
-                    zone_name AS name,
+                    z.zone_id AS id,
+                    z.zone_name AS name,
                     CAST('zone' AS NVARCHAR(20)) AS type,
-                    greenhouse_id AS parent_id,
-                    level + 1,
-                    path + ':' + CAST(zone_id AS NVARCHAR(10))
+                    z.greenhouse_id AS parent_id,
+                    z.recipe_id,
+                    z.start_date,
+                    z.temperature,
+                    z.humidity,
+                    z.status,
+                    zt.level + 1,
+                    zt.path + ':' + CAST(z.zone_id AS NVARCHAR(10))
                 FROM Zone z
                 INNER JOIN ZoneTree zt ON z.greenhouse_id = zt.id AND zt.type = 'greenhouse'
             )
-            SELECT * FROM ZoneTree ORDER BY path
+            SELECT zt.id, zt.name, zt.type, zt.parent_id, zt.recipe_id,
+                CONVERT(VARCHAR(10), zt.start_date, 23) AS start_date,
+                zt.temperature, zt.humidity, zt.status, zt.level, zt.path
+            FROM ZoneTree zt ORDER BY zt.path
         `);
         // Trả về danh sách flat, front-end sẽ parse thành cây
         res.json(result.recordset);
@@ -310,7 +328,7 @@ app.post('/api/devices', async (req, res) => {
             .input('zone_id', sql.Int, zone_id)
             .input('gateway_id', sql.Int, gateway_id)
             .input('batteryLevel', sql.Int, batteryLevel)
-            .input('status', sql.NVarChar, 'ACTIVE')
+            .input('status', sql.NVarChar, 'PENDING')
             .input('lastHeartbeat', sql.DateTime2, new Date())
             .query(`
                 INSERT INTO Device (device_name, device_type, metric_type, mac_address, zone_id, gateway_id, battery_level, status, last_heartbeat)
@@ -348,8 +366,8 @@ app.put('/api/devices/:id', async (req, res) => {
             .input('macAddress', sql.NVarChar, macAddress)
             .input('zone_id', sql.Int, zone_id)
             .input('gateway_id', sql.Int, gateway_id)
-            .input('status', sql.NVarChar, status)
-            .input('batteryLevel', sql.Int, batteryLevel)
+            .input('status', sql.NVarChar, status || null)
+            .input('batteryLevel', sql.Int, batteryLevel ?? null)
             .query(`
                 UPDATE Device SET
                     device_name = @name,
@@ -358,8 +376,8 @@ app.put('/api/devices/:id', async (req, res) => {
                     mac_address = @macAddress,
                     zone_id = @zone_id,
                     gateway_id = @gateway_id,
-                    status = @status,
-                    battery_level = @batteryLevel
+                    status = COALESCE(@status, status),
+                    battery_level = COALESCE(@batteryLevel, battery_level)
                 WHERE device_id = @id
             `);
         res.json({ message: 'Cập nhật thiết bị thành công' });
@@ -374,7 +392,12 @@ app.delete('/api/devices/:id', async (req, res) => {
         const pool = await getConnection();
         await pool.request()
             .input('id', sql.Int, id)
-            .query(`DELETE FROM Device WHERE device_id = @id`);
+            .query(`
+                DELETE FROM [Log] WHERE device_id = @id;
+                DELETE FROM SensorData WHERE device_id = @id;
+                DELETE FROM ControlProperties WHERE device_id = @id;
+                DELETE FROM Device WHERE device_id = @id;
+            `);
         res.json({ message: 'Xóa thiết bị thành công' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -464,7 +487,7 @@ app.get('/api/recipes', async (req, res) => {
                 creator AS creator_id,
                 description,
                 status,
-                created_date
+                CONVERT(VARCHAR(10), created_date, 23) AS created_date
             FROM Recipe
         `);
         res.json(result.recordset);
@@ -487,7 +510,7 @@ app.get('/api/recipes/:id', async (req, res) => {
                     creator AS creator_id,
                     description,
                     status,
-                    created_date
+                    CONVERT(VARCHAR(10), created_date, 23) AS created_date
                 FROM Recipe WHERE recipe_id = @id
             `);
         if (result.recordset.length === 0) {
@@ -556,7 +579,20 @@ app.delete('/api/recipes/:id', async (req, res) => {
         const pool = await getConnection();
         await pool.request()
             .input('id', sql.Int, id)
-            .query(`DELETE FROM Recipe WHERE recipe_id = @id`);
+            .query(`
+                BEGIN TRANSACTION;
+                BEGIN TRY
+                    UPDATE Zone SET recipe_id = NULL WHERE recipe_id = @id;
+                    DELETE FROM Threshold WHERE stage_id IN (SELECT stage_id FROM GrowthStage WHERE recipe_id = @id);
+                    DELETE FROM GrowthStage WHERE recipe_id = @id;
+                    DELETE FROM Recipe WHERE recipe_id = @id;
+                    COMMIT TRANSACTION;
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                    THROW;
+                END CATCH
+            `);
         res.json({ message: 'Xóa công thức thành công' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -635,7 +671,9 @@ app.get('/api/alerts', async (req, res) => {
         // Chuyển đổi severity: 'SIGNIFICANT' → 'info', 'WARNING' → 'warning', 'CRITICAL' → 'critical'
         const alerts = result.recordset.map(a => ({
             ...a,
-            severity: a.severity === 'SIGNIFICANT' ? 'info' : a.severity.toLowerCase()
+            title: a.severity === 'CRITICAL' ? 'Sự cố nghiêm trọng' : a.severity === 'WARNING' ? 'Cảnh báo môi trường' : 'Thông báo hệ thống',
+            severity: a.severity === 'SIGNIFICANT' ? 'info' : a.severity.toLowerCase(),
+            status: a.status === 'UNSOLVED' ? 'active' : a.status.toLowerCase()
         }));
         res.json(alerts);
     } catch (err) {
@@ -656,7 +694,7 @@ app.put('/api/alerts/:id/status', async (req, res) => {
             .query(`
                 UPDATE AlertLog SET
                     status = @status,
-                    acknowledged_by = @acknowledgedBy,
+                    acknowledged_by = COALESCE(@acknowledgedBy, acknowledged_by),
                     resolved_at = @resolvedAt
                 WHERE alert_id = @id
             `);
@@ -688,16 +726,20 @@ app.get('/api/logs', async (req, res) => {
         const pool = await getConnection();
         const result = await pool.request().query(`
             SELECT 
-                log_id AS id,
-                device_id,
-                user_id,
-                action,
-                triggered_by AS triggeredBy,
-                log_time AS timestamp
-            FROM [Log]
-            ORDER BY log_time DESC
+                l.log_id AS id,
+                l.device_id AS deviceId,
+                l.user_id AS userId,
+                u.user_name AS userName,
+                u.role AS userRole,
+                d.device_name AS deviceName,
+                l.action AS description,
+                l.triggered_by AS triggeredBy,
+                l.log_time AS timestamp
+            FROM [Log] l
+            LEFT JOIN [User] u ON l.user_id = u.user_id
+            JOIN Device d ON l.device_id = d.device_id
+            ORDER BY l.log_time DESC
         `);
-        // Lấy thêm thông tin user và device nếu cần (có thể join)
         res.json(result.recordset);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -705,7 +747,43 @@ app.get('/api/logs', async (req, res) => {
 });
 
 // ======================================================================
-// 12. API STATISTICS (cho Dashboard)
+// 12. API SENSOR DATA (dữ liệu mô phỏng nhận qua MQTT)
+// ======================================================================
+
+app.get('/api/sensor-data', async (req, res) => {
+    try {
+        const greenhouseId = Number(req.query.greenhouseId);
+        const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 1000);
+        const pool = await getConnection();
+        const request = pool.request().input('limit', sql.Int, limit);
+        let whereClause = '';
+        if (Number.isInteger(greenhouseId) && greenhouseId > 0) {
+            request.input('greenhouseId', sql.Int, greenhouseId);
+            whereClause = 'WHERE z.greenhouse_id = @greenhouseId';
+        }
+        const result = await request.query(`
+            SELECT TOP (@limit)
+                sd.device_id AS deviceId,
+                d.device_name AS deviceName,
+                d.metric_type AS metricType,
+                d.zone_id AS zoneId,
+                z.greenhouse_id AS greenhouseId,
+                sd.[timestamp],
+                sd.raw_value AS value
+            FROM SensorData sd
+            JOIN Device d ON sd.device_id = d.device_id
+            JOIN Zone z ON d.zone_id = z.zone_id
+            ${whereClause}
+            ORDER BY sd.[timestamp] DESC
+        `);
+        res.json(result.recordset.reverse());
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ======================================================================
+// 13. API STATISTICS (cho Dashboard)
 // ======================================================================
 
 app.get('/api/stats/greenhouse/:greenhouseId', async (req, res) => {
@@ -842,40 +920,38 @@ app.post('/api/zones', async (req, res) => {
     }
 });
 
-// PUT /api/zones/:id - Cập nhật vùng (chỉ hỗ trợ zone)
+// PUT /api/zones/:id - Cập nhật farm, greenhouse hoặc zone
 app.put('/api/zones/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, type, greenhouse_id, recipe_id, start_date, temperature, humidity, status } = req.body;
+        const { name, type, parent_id, greenhouse_id, recipe_id, start_date, temperature, humidity, status } = req.body;
         const pool = await getConnection();
-
-        // Kiểm tra zone tồn tại
-        const checkZone = await pool.request()
-            .input('id', sql.Int, id)
-            .query('SELECT zone_id FROM Zone WHERE zone_id = @id');
-        if (checkZone.recordset.length === 0) {
-            return res.status(404).json({ error: 'Không tìm thấy vùng (zone)' });
+        if (type === 'farm') {
+            await pool.request().input('id', sql.Int, id).input('name', sql.NVarChar, name)
+                .query('UPDATE Farm SET farm_name = @name WHERE farm_id = @id');
+        } else if (type === 'greenhouse') {
+            await pool.request().input('id', sql.Int, id).input('name', sql.NVarChar, name)
+                .input('farmId', sql.Int, parent_id)
+                .query('UPDATE Greenhouse SET greenhouse_name = @name, farm_id = @farmId WHERE greenhouse_id = @id');
+        } else if (type === 'zone') {
+            await pool.request()
+                .input('id', sql.Int, id)
+                .input('name', sql.NVarChar, name)
+                .input('greenhouseId', sql.Int, greenhouse_id || parent_id)
+                .input('recipeId', sql.Int, recipe_id || null)
+                .input('startDate', sql.Date, start_date || null)
+                .input('temperature', sql.Decimal(5,2), temperature ?? null)
+                .input('humidity', sql.Int, humidity ?? null)
+                .input('status', sql.NVarChar, status || null)
+                .query(`
+                    UPDATE Zone SET zone_name = @name, greenhouse_id = @greenhouseId,
+                        recipe_id = @recipeId, start_date = @startDate,
+                        temperature = @temperature, humidity = @humidity, status = @status
+                    WHERE zone_id = @id
+                `);
+        } else {
+            return res.status(400).json({ error: 'Loại vùng không hợp lệ' });
         }
-
-        await pool.request()
-            .input('id', sql.Int, id)
-            .input('name', sql.NVarChar, name)
-            .input('recipeId', sql.Int, recipe_id || null)
-            .input('startDate', sql.Date, start_date || null)
-            .input('temperature', sql.Decimal(5,2), temperature || null)
-            .input('humidity', sql.Int, humidity || null)
-            .input('status', sql.NVarChar, status || null)
-            .query(`
-                UPDATE Zone SET
-                    zone_name = @name,
-                    recipe_id = @recipeId,
-                    start_date = @startDate,
-                    temperature = @temperature,
-                    humidity = @humidity,
-                    status = @status
-                WHERE zone_id = @id
-            `);
-
         res.json({ message: 'Cập nhật vùng thành công' });
     } catch (err) {
         console.error('PUT /api/zones/:id error:', err);
@@ -887,60 +963,35 @@ app.put('/api/zones/:id', async (req, res) => {
 app.delete('/api/zones/:id', async (req, res) => {
     try {
         const { id } = req.params;
+        const { type = 'zone' } = req.query;
+        if (!['farm', 'greenhouse', 'zone'].includes(type)) {
+            return res.status(400).json({ error: 'Loại vùng không hợp lệ' });
+        }
         const pool = await getConnection();
-
-        // Kiểm tra xem id thuộc bảng nào
-        const checkZone = await pool.request()
-            .input('id', sql.Int, id)
-            .query('SELECT zone_id FROM Zone WHERE zone_id = @id');
-        if (checkZone.recordset.length > 0) {
-            // Xóa zone
-            await pool.request()
-                .input('id', sql.Int, id)
-                .query('DELETE FROM Zone WHERE zone_id = @id');
-            return res.json({ message: 'Xóa zone thành công' });
-        }
-
-        // Kiểm tra greenhouse
-        const checkGreenhouse = await pool.request()
-            .input('id', sql.Int, id)
-            .query('SELECT greenhouse_id FROM Greenhouse WHERE greenhouse_id = @id');
-        if (checkGreenhouse.recordset.length > 0) {
-            // Xóa các zone thuộc greenhouse
-            await pool.request()
-                .input('id', sql.Int, id)
-                .query('DELETE FROM Zone WHERE greenhouse_id = @id');
-            // Xóa greenhouse
-            await pool.request()
-                .input('id', sql.Int, id)
-                .query('DELETE FROM Greenhouse WHERE greenhouse_id = @id');
-            return res.json({ message: 'Xóa greenhouse và các zone thành công' });
-        }
-
-        // Kiểm tra farm
-        const checkFarm = await pool.request()
-            .input('id', sql.Int, id)
-            .query('SELECT farm_id FROM Farm WHERE farm_id = @id');
-        if (checkFarm.recordset.length > 0) {
-            // Lấy danh sách greenhouse trong farm
-            const ghList = await pool.request()
-                .input('farmId', sql.Int, id)
-                .query('SELECT greenhouse_id FROM Greenhouse WHERE farm_id = @farmId');
-            for (let gh of ghList.recordset) {
-                await pool.request()
-                    .input('ghId', sql.Int, gh.greenhouse_id)
-                    .query('DELETE FROM Zone WHERE greenhouse_id = @ghId');
-            }
-            await pool.request()
-                .input('farmId', sql.Int, id)
-                .query('DELETE FROM Greenhouse WHERE farm_id = @farmId');
-            await pool.request()
-                .input('farmId', sql.Int, id)
-                .query('DELETE FROM Farm WHERE farm_id = @farmId');
-            return res.json({ message: 'Xóa farm và toàn bộ cấu trúc bên dưới thành công' });
-        }
-
-        res.status(404).json({ error: 'Không tìm thấy vùng' });
+        const zoneFilter = type === 'zone'
+            ? 'zone_id = @id'
+            : type === 'greenhouse'
+                ? 'greenhouse_id = @id'
+                : 'greenhouse_id IN (SELECT greenhouse_id FROM Greenhouse WHERE farm_id = @id)';
+        await pool.request().input('id', sql.Int, id).query(`
+            BEGIN TRANSACTION;
+            BEGIN TRY
+                DELETE FROM [Log] WHERE device_id IN (SELECT device_id FROM Device WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter}));
+                DELETE FROM SensorData WHERE device_id IN (SELECT device_id FROM Device WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter}));
+                DELETE FROM ControlProperties WHERE device_id IN (SELECT device_id FROM Device WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter}));
+                DELETE FROM Device WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter});
+                DELETE FROM AlertLog WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter});
+                DELETE FROM Zone WHERE ${zoneFilter};
+                ${type === 'greenhouse' ? 'DELETE FROM Gateway WHERE greenhouse_id = @id; DELETE FROM Greenhouse WHERE greenhouse_id = @id;' : ''}
+                ${type === 'farm' ? 'DELETE FROM Gateway WHERE greenhouse_id IN (SELECT greenhouse_id FROM Greenhouse WHERE farm_id = @id); DELETE FROM Greenhouse WHERE farm_id = @id; DELETE FROM Farm WHERE farm_id = @id;' : ''}
+                COMMIT TRANSACTION;
+            END TRY
+            BEGIN CATCH
+                IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                THROW;
+            END CATCH
+        `);
+        res.json({ message: 'Xóa cấu trúc vùng thành công' });
     } catch (err) {
         console.error('DELETE /api/zones/:id error:', err);
         res.status(500).json({ error: err.message });

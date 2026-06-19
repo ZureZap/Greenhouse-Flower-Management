@@ -215,7 +215,7 @@ export async function acknowledgeAlert(id) {
     try {
         await updateAlertStatus(id, 'ACKNOWLEDGED', 'Người dùng hiện tại');
         // Cập nhật cục bộ
-        const alert = alerts.find(a => a.id === id);
+        const alert = alerts.find(a => String(a.id) === String(id));
         if (alert) {
             alert.status = 'acknowledged';
             alert.acknowledgedBy = 'Người dùng hiện tại';
@@ -230,7 +230,7 @@ export async function acknowledgeAlert(id) {
 export async function resolveAlert(id) {
     try {
         await updateAlertStatus(id, 'RESOLVED');
-        const alert = alerts.find(a => a.id === id);
+        const alert = alerts.find(a => String(a.id) === String(id));
         if (alert) alert.status = 'resolved';
         await renderAlerts();
         showToast('Đã giải quyết cảnh báo');
@@ -242,7 +242,7 @@ export async function resolveAlert(id) {
 export async function dismissAlert(id) {
     try {
         await deleteAlert(id);
-        alerts = alerts.filter(a => a.id !== id);
+        alerts = alerts.filter(a => String(a.id) !== String(id));
         await renderAlerts();
         showToast('Đã loại bỏ cảnh báo', 'info');
     } catch (err) {

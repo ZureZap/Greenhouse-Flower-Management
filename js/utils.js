@@ -52,7 +52,7 @@ export function findParentNode(nodes, childId) {
  */
 export function getZoneById(zoneId, nodes = []) {
     for (const node of nodes) {
-        if (node.id === zoneId) return node;
+        if (node.type === 'zone' && String(node.id) === String(zoneId)) return node;
         if (node.children) {
             const found = getZoneById(zoneId, node.children);
             if (found) return found;
@@ -79,14 +79,20 @@ export function getZoneName(zoneId, zonesData = []) {
  * @returns {string|null} ID greenhouse hoặc null
  */
 export function getGreenhouseIdByZoneId(zoneId, zonesData = []) {
-    const zone = getZoneById(zoneId, zonesData);
-    if (!zone) return null;
-    let parent = findParentNode(zonesData, zoneId);
-    while (parent) {
-        if (parent.type === 'greenhouse') return parent.id;
-        parent = findParentNode(zonesData, parent.id);
+    function traverse(nodes, greenhouseId = null) {
+        for (const node of nodes) {
+            const currentGreenhouseId = node.type === 'greenhouse' ? node.id : greenhouseId;
+            if (node.type === 'zone' && String(node.id) === String(zoneId)) {
+                return currentGreenhouseId;
+            }
+            if (node.children) {
+                const found = traverse(node.children, currentGreenhouseId);
+                if (found !== null) return found;
+            }
+        }
+        return null;
     }
-    return null;
+    return traverse(zonesData);
 }
 
 /**
@@ -102,7 +108,7 @@ export function getZoneOptions(greenhouseId = null, zonesData = []) {
             if (node.type === 'zone') {
                 if (greenhouseId) {
                     const ghId = getGreenhouseIdByZoneId(node.id, zonesData);
-                    if (ghId === greenhouseId) {
+                    if (String(ghId) === String(greenhouseId)) {
                         zones.push({ id: node.id, name: node.name });
                     }
                 } else {

@@ -50,15 +50,16 @@ function getGatewayOptions() {
 }
 
 function getGatewayName(gatewayId) {
-    const gw = gateways.find(g => g.id === gatewayId);
+    const gw = gateways.find(g => String(g.id) === String(gatewayId));
     return gw ? gw.name : gatewayId;
 }
 
 // ===================== TIỆN ÍCH HIỂN THỊ =====================
 function deviceStatusChip(status) {
     const statusMap = {
-        ACTIVE: ['chip-success', '✔ Hoạt động'],
+        ONLINE: ['chip-success', '✔ Hoạt động'],
         OFFLINE: ['chip-warning', '⚠ Mất kết nối'],
+        ERROR: ['chip-error', '✖ Lỗi'],
         NEEDS_REPLACEMENT: ['chip-error', '✖ Cần thay thế'],
         PENDING: ['chip-default', '⏳ Chờ phê duyệt']
     };
@@ -243,8 +244,8 @@ export async function renderDevices() {
     let filteredDevices = devices;
     if (filterGreenhouseId) {
         filteredDevices = devices.filter(d => {
-            const ghId = getGreenhouseIdByZoneId(d.zone_id);
-            return ghId === filterGreenhouseId;
+            const ghId = getGreenhouseIdByZoneId(d.zone_id, zones);
+            return String(ghId) === String(filterGreenhouseId);
         });
     }
 
@@ -252,7 +253,7 @@ export async function renderDevices() {
     const statsContainer = document.getElementById('device-stats');
     if (statsContainer) {
         const total = filteredDevices.length;
-        const active = filteredDevices.filter(d => d.status === 'ACTIVE').length;
+        const active = filteredDevices.filter(d => d.status === 'ONLINE').length;
         const offline = filteredDevices.filter(d => d.status === 'OFFLINE').length;
         const replace = filteredDevices.filter(d => d.status === 'NEEDS_REPLACEMENT').length;
         const stats = [
@@ -286,7 +287,7 @@ export async function renderDevices() {
                 <td>${device.device_type}</td>
                 <td>${device.metric_type}</td>
                 <td>${getGatewayName(device.gateway_id)}</td>
-                <td>${getZoneName(device.zone_id)}</td>
+                <td>${getZoneName(device.zone_id, zones)}</td>
                 <td>${deviceStatusChip(device.status)}</td>
                 <td>${batteryChip(device.batteryLevel)}</td>
                 <td style="font-size:0.85rem">${device.lastHeartbeat ? new Date(device.lastHeartbeat).toLocaleTimeString('vi-VN') : '-'}</td>
@@ -373,7 +374,7 @@ function populateZoneSelect(selectedZoneId = '') {
         const option = document.createElement('option');
         option.value = z.id;
         option.textContent = z.name;
-        if (z.id === selectedZoneId) option.selected = true;
+        if (String(z.id) === String(selectedZoneId)) option.selected = true;
         select.appendChild(option);
     });
     if (filterGreenhouseId && zoneOpts.length === 0) {
@@ -385,7 +386,7 @@ function populateZoneSelect(selectedZoneId = '') {
 }
 
 export async function openDeviceApproval(id) {
-    const device = devices.find(d => d.id === id);
+    const device = devices.find(d => String(d.id) === String(id));
     if (!device) return;
     pendingDeviceId = id;
     document.getElementById('dev-name').value = device.name;
@@ -417,7 +418,7 @@ export function showAddDeviceModal() {
 }
 
 export async function editDevice(id) {
-    const device = devices.find(d => d.id === id);
+    const device = devices.find(d => String(d.id) === String(id));
     if (!device) return;
     document.getElementById('dev-name').value = device.name;
     document.getElementById('dev-type').value = device.device_type;
@@ -436,7 +437,7 @@ export async function deleteDevice(id) {
     if (confirm('Bạn có chắc chắn muốn xóa thiết bị này?')) {
         try {
             await deleteDeviceApi(id);
-            devices = devices.filter(d => d.id !== id);
+            devices = devices.filter(d => String(d.id) !== String(id));
             await renderDevices();
             showToast('Đã xóa thiết bị', 'info');
         } catch (err) {
@@ -477,7 +478,7 @@ export async function approveDevice() {
         if (window._editingDeviceId) {
             // Sửa
             await updateDevice(window._editingDeviceId, deviceData);
-            const idx = devices.findIndex(d => d.id === window._editingDeviceId);
+            const idx = devices.findIndex(d => String(d.id) === String(window._editingDeviceId));
             if (idx !== -1) {
                 devices[idx] = { ...devices[idx], ...deviceData };
             }
@@ -485,17 +486,17 @@ export async function approveDevice() {
             window._editingDeviceId = null;
         } else if (window._addingNew) {
             // Thêm mới
-            const newDevice = await createDevice(deviceData);
-            devices.push(newDevice);
+            await createDevice(deviceData);
+            await loadData();
             showToast('Đã thêm thiết bị mới');
             window._addingNew = false;
         } else {
             // Phê duyệt (cập nhật status)
             const id = pendingDeviceId;
-            await updateDevice(id, { ...deviceData, status: 'ACTIVE' });
-            const dev = devices.find(d => d.id === id);
+            await updateDevice(id, { ...deviceData, status: 'ONLINE' });
+            const dev = devices.find(d => String(d.id) === String(id));
             if (dev) {
-                Object.assign(dev, deviceData, { status: 'ACTIVE' });
+                Object.assign(dev, deviceData, { status: 'ONLINE' });
             }
             showToast('Thiết bị đã được phê duyệt');
         }

@@ -70,7 +70,7 @@ function showPendingPopup() {
             const id = btn.dataset.id;
             try {
                 await updateUserStatus(id, 'ACTIVE');
-                const user = users.find(u => u.id === id);
+                const user = users.find(u => String(u.id) === String(id));
                 if (user) user.status = 'ACTIVE';
                 showToast('Đã phê duyệt', 'success');
                 closeModal('pending-popup');
@@ -94,7 +94,7 @@ function showPendingPopup() {
             if (confirm('Từ chối sẽ xóa tài khoản này. Bạn chắc chắn?')) {
                 try {
                     await updateUserStatus(id, 'REJECTED');
-                    users = users.filter(u => u.id !== id);
+                    users = users.filter(u => String(u.id) !== String(id));
                     showToast('Đã từ chối', 'info');
                     closeModal('pending-popup');
                     document.getElementById('pending-popup').remove();
@@ -210,7 +210,7 @@ export async function renderUserApprovalPage() {
             const newRole = e.target.value;
             try {
                 await updateUserRole(userId, newRole);
-                const user = users.find(u => u.id === userId);
+                const user = users.find(u => String(u.id) === String(userId));
                 if (user) user.role = newRole;
                 showToast(`Đã cập nhật role cho ${user.username}`, 'success');
             } catch (err) {

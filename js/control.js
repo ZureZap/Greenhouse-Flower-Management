@@ -53,7 +53,7 @@ export async function renderControls() {
     if (filterGreenhouseId) {
         devicesWithControl = devicesWithControl.filter(d => {
             const ghId = getGreenhouseIdByZoneId(d.zone_id, zones);
-            return ghId === filterGreenhouseId;
+            return String(ghId) === String(filterGreenhouseId);
         });
     }
 
@@ -186,9 +186,9 @@ export async function renderControlPage() {
 
 // ===================== HÀM XỬ LÝ SỰ KIỆN =====================
 export async function toggleControlMode(deviceId) {
-    const device = devices.find(d => d.id === deviceId);
+    const device = devices.find(d => String(d.id) === String(deviceId));
     if (!device) return;
-    const control = controlProperties.find(cp => cp.device_id === deviceId);
+    const control = controlProperties.find(cp => String(cp.device_id) === String(deviceId));
     if (!control) return;
 
     let newMode, newAutoResetTime;
@@ -218,9 +218,9 @@ export async function toggleControlMode(deviceId) {
 }
 
 export async function toggleDevice(deviceId) {
-    const device = devices.find(d => d.id === deviceId);
+    const device = devices.find(d => String(d.id) === String(deviceId));
     if (!device) return;
-    const control = controlProperties.find(cp => cp.device_id === deviceId);
+    const control = controlProperties.find(cp => String(cp.device_id) === String(deviceId));
     if (!control) return;
 
     if (control.mode === 'AUTO') {
@@ -245,7 +245,7 @@ export async function toggleDevice(deviceId) {
 }
 
 export async function setControlValue(deviceId, value) {
-    const control = controlProperties.find(cp => cp.device_id === deviceId);
+    const control = controlProperties.find(cp => String(cp.device_id) === String(deviceId));
     if (!control) return;
 
     const newVal = parseInt(value, 10);
@@ -264,7 +264,7 @@ export async function setControlValue(deviceId, value) {
 }
 
 export async function resetToAuto(deviceId) {
-    const control = controlProperties.find(cp => cp.device_id === deviceId);
+    const control = controlProperties.find(cp => String(cp.device_id) === String(deviceId));
     if (!control) return;
 
     try {

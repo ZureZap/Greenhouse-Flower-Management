@@ -161,7 +161,7 @@ async function handleDeleteRecipe(id) {
     if (confirm('Bạn có chắc chắn muốn xóa công thức này?')) {
         try {
             await deleteRecipe(id); // Gọi hàm xóa từ api.js
-            recipes = recipes.filter(r => r.id !== id);
+            recipes = recipes.filter(r => String(r.id) !== String(id));
             await renderGrowth();
             showToast('Đã xóa công thức', 'info');
         } catch (err) {
@@ -172,7 +172,7 @@ async function handleDeleteRecipe(id) {
 
 // ===================== SỬA CÔNG THỨC =====================
 function editRecipe(id) {
-    const recipe = recipes.find(r => r.id === id);
+    const recipe = recipes.find(r => String(r.id) === String(id));
     if (recipe) openRecipeModal(recipe);
     else showToast('Không tìm thấy công thức', 'error');
 }
@@ -418,7 +418,7 @@ export async function applyGrowthAdjust() {
         showToast('Nhập số ngày hợp lệ', 'warning');
         return;
     }
-    const recipe = recipes.find(r => r.id === growthAdjustId);
+    const recipe = recipes.find(r => String(r.id) === String(growthAdjustId));
     if (recipe) {
         let targetStage = recipe.stages.find(s => !s.completed && s.currentDay !== null);
         if (!targetStage) {

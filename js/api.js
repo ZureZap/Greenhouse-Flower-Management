@@ -123,8 +123,8 @@ export async function updateZone(id, data) {
     });
 }
 
-export async function deleteZone(id) {
-    return request(`/zones/${id}`, {
+export async function deleteZone(id, type = 'zone') {
+    return request(`/zones/${id}?type=${encodeURIComponent(type)}`, {
         method: 'DELETE'
     });
 }
@@ -277,6 +277,12 @@ export async function getLogs() {
     return request('/logs');
 }
 
+export async function getSensorData(greenhouseId = null, limit = 200) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (greenhouseId) params.set('greenhouseId', String(greenhouseId));
+    return request(`/sensor-data?${params.toString()}`);
+}
+
 // ======================================================================
 // STATISTICS
 // ======================================================================
@@ -304,6 +310,9 @@ export default {
     getFarms,
     getGreenhouses,
     getZones,
+    createZone,
+    updateZone,
+    deleteZone,
     getDevices,
     getDevice,
     createDevice,
@@ -319,10 +328,14 @@ export default {
     deleteRecipe,
     getStages,
     getThresholds,
+    createStage,
+    updateStage,
+    deleteStage,
     getAlerts,
     updateAlertStatus,
     deleteAlert,
     getLogs,
+    getSensorData,
     getGreenhouseStats,
     getGlobalStats
 };

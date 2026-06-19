@@ -13,5 +13,20 @@ Cách 2: mở bảng terminal tại folder web rồi nhập lệnh "npx http-ser
 2. Tạo database SmartFarmDB và chạy script SQL.
 3. Cấu hình file `.env` với thông tin kết nối.
 4. Trong thư mục `smartfarm-api`, chạy:
-   npm install
-   node server.js
+
+```bash
+npm install
+npm start
+```
+
+## Tài khoản kiểm thử
+
+| Vai trò | Tài khoản | Mật khẩu |
+|---|---|---|
+| Chủ trang trại | `greenhouse_owner` | `demo123` |
+| Kỹ thuật viên | `agronomist` | `demo123` |
+| Nhân viên vận hành | `operator_a` | `demo123` |
+
+Tài khoản `pending_operator / demo123` dùng để kiểm thử chức năng phê duyệt.
+
+Dashboard đọc dữ liệu lịch sử từ bảng `SensorData`. Khi tích hợp MQTT, backend chỉ cần ghi payload nhận được vào bảng này.
