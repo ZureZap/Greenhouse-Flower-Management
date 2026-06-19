@@ -5,93 +5,100 @@
  * Sử dụng API backend thay vì state.js.
  */
 
-import { escapeHtml } from './utils.js';
-import { getLogs } from './api.js';
+import { escapeHtml } from "./utils.js";
+import { getLogs } from "./api.js";
 
 // ===================== BIẾN TOÀN CỤC =====================
 let logs = [];
 
 // ===================== LOAD DỮ LIỆU =====================
 async function loadLogs() {
-    try {
-        logs = await getLogs();
-        return logs;
-    } catch (err) {
-        console.error('Lỗi tải logs:', err);
-        logs = [];
-        throw err;
-    }
+  try {
+    logs = await getLogs();
+    return logs;
+  } catch (err) {
+    console.error("Lỗi tải logs:", err);
+    logs = [];
+    throw err;
+  }
 }
 
 // ===================== RENDER DỮ LIỆU =====================
 export async function renderLogs() {
-    // Kiểm tra các phần tử bộ lọc tồn tại
-    const filterAction = document.getElementById('log-filter-action');
-    const filterRole = document.getElementById('log-filter-role');
-    if (!filterAction || !filterRole) return;
+  // Kiểm tra các phần tử bộ lọc tồn tại
+  const filterAction = document.getElementById("log-filter-action");
+  const filterRole = document.getElementById("log-filter-role");
+  if (!filterAction || !filterRole) return;
 
-    const actionFilter = filterAction.value;
-    const roleFilter = filterRole.value;
+  const actionFilter = filterAction.value;
+  const roleFilter = filterRole.value;
 
-    // Lọc logs
-    const filteredLogs = logs.filter(log =>
-        (actionFilter === 'ALL' || log.triggeredBy === actionFilter) &&
-        (roleFilter === 'ALL' || log.userRole === roleFilter)
-    );
+  // Lọc logs
+  const filteredLogs = logs.filter(
+    (log) =>
+      (actionFilter === "ALL" || log.triggeredBy === actionFilter) &&
+      (roleFilter === "ALL" || log.userRole === roleFilter)
+  );
 
-    // --- Cập nhật 3 card thống kê ---
-    const totalEl = document.getElementById('log-total');
-    if (totalEl) totalEl.textContent = logs.length;
+  // --- Cập nhật 3 card thống kê ---
+  const totalEl = document.getElementById("log-total");
+  if (totalEl) totalEl.textContent = logs.length;
 
-    const overridesEl = document.getElementById('log-overrides');
-    if (overridesEl) overridesEl.textContent = logs.filter(log => log.triggeredBy === 'SYSTEM').length;
+  const overridesEl = document.getElementById("log-overrides");
+  if (overridesEl)
+    overridesEl.textContent = logs.filter((log) => log.triggeredBy === "SYSTEM").length;
 
-    const usersEl = document.getElementById('log-users');
-    if (usersEl) usersEl.textContent = new Set(logs.filter(log => log.userId).map(log => log.userId)).size;
+  const usersEl = document.getElementById("log-users");
+  if (usersEl)
+    usersEl.textContent = new Set(logs.filter((log) => log.userId).map((log) => log.userId)).size;
 
-    // --- Ánh xạ vai trò ---
-    const roleMap = {
-        OWNER: 'chip-error',
-        TECHNICIAN: 'chip-info',
-        OPERATOR: 'chip-default'
-    };
+  // --- Ánh xạ vai trò ---
+  const roleMap = {
+    OWNER: "chip-error",
+    TECHNICIAN: "chip-info",
+    OPERATOR: "chip-default"
+  };
 
-    // --- Render bảng ---
-    const tableBody = document.getElementById('log-table');
-    if (tableBody) {
-        if (filteredLogs.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#6b7280;">Không có bản ghi nào phù hợp.</td></tr>`;
-            return;
-        }
-        tableBody.innerHTML = filteredLogs.map(log => `
-            <tr>
-                <td style="font-size:0.82rem">${log.timestamp ? new Date(log.timestamp).toLocaleString('vi-VN') : '-'}</td>
-                <td>
-                    <div style="font-weight:500">${escapeHtml(log.userName || 'Hệ thống')}</div>
-                    <div style="font-size:0.75rem;color:#9ca3af">${escapeHtml(log.userId || '-')}</div>
-                </td>
-                <td><span class="chip ${roleMap[log.userRole] || 'chip-default'}">${escapeHtml(log.userRole || '-')}</span></td>
-                <td><span class="chip ${log.triggeredBy === 'SYSTEM' ? 'chip-info' : 'chip-success'}">${log.triggeredBy === 'SYSTEM' ? 'Hệ thống' : 'Người dùng'}</span></td>
-                <td>${escapeHtml(log.deviceName || '-')}</td>
-                <td style="font-size:0.82rem;max-width:360px">${escapeHtml(log.description || '-')}</td>
-            </tr>
-        `).join('');
+  // --- Render bảng ---
+  const tableBody = document.getElementById("log-table");
+  if (tableBody) {
+    if (filteredLogs.length === 0) {
+      tableBody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#6b7280;">Không có bản ghi nào phù hợp.</td></tr>`;
+      return;
     }
+    tableBody.innerHTML = filteredLogs
+      .map(
+        (log) => `
+            <tr>
+                <td style="font-size:0.82rem">${log.timestamp ? new Date(log.timestamp).toLocaleString("vi-VN") : "-"}</td>
+                <td>
+                    <div style="font-weight:500">${escapeHtml(log.userName || "Hệ thống")}</div>
+                    <div style="font-size:0.75rem;color:#9ca3af">${escapeHtml(log.userId || "-")}</div>
+                </td>
+                <td><span class="chip ${roleMap[log.userRole] || "chip-default"}">${escapeHtml(log.userRole || "-")}</span></td>
+                <td><span class="chip ${log.triggeredBy === "SYSTEM" ? "chip-info" : "chip-success"}">${log.triggeredBy === "SYSTEM" ? "Hệ thống" : "Người dùng"}</span></td>
+                <td>${escapeHtml(log.deviceName || "-")}</td>
+                <td style="font-size:0.82rem;max-width:360px">${escapeHtml(log.description || "-")}</td>
+            </tr>
+        `
+      )
+      .join("");
+  }
 }
 
 // ===================== RENDER TOÀN BỘ TRANG =====================
 export async function renderLogsPage() {
-    const container = document.getElementById('page-logs');
-    if (!container) return;
+  const container = document.getElementById("page-logs");
+  if (!container) return;
 
-    try {
-        await loadLogs();
-    } catch (err) {
-        container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
-        return;
-    }
+  try {
+    await loadLogs();
+  } catch (err) {
+    container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
+    return;
+  }
 
-    container.innerHTML = `
+  container.innerHTML = `
         <div class="page-header">
             <div>
                 <div class="page-title">Nhật ký Hệ thống</div>
@@ -162,7 +169,7 @@ export async function renderLogsPage() {
         </div>
     `;
 
-    await renderLogs();
+  await renderLogs();
 }
 
 // ===================== EXPOSE GLOBAL =====================

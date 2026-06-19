@@ -1,9 +1,14 @@
-import { login } from '../auth.js';
-import { showToast } from '../app.js';
+/**
+ * login.js
+ * Render biểu mẫu đăng nhập và chuyển hướng sau khi xác thực thành công.
+ */
+
+import { login } from "../auth.js";
+import { showToast } from "../app.js";
 
 export function renderLoginPage() {
-    const container = document.getElementById('page-login');
-    container.innerHTML = `
+  const container = document.getElementById("page-login");
+  container.innerHTML = `
         <div style="display:flex; justify-content:center; align-items:center; min-height:80vh;">
             <div class="card" style="width:400px;">
                 <div class="card-title" style="text-align:center">🔐 Đăng nhập</div>
@@ -22,21 +27,21 @@ export function renderLoginPage() {
             </div>
         </div>
     `;
-    document.getElementById('login-btn').onclick = async () => {
-        const username = document.getElementById('login-username').value.trim();
-        const password = document.getElementById('login-password').value;
-        if (!username || !password) return showToast('Nhập đầy đủ', 'warning');
-        try {
-            await login(username, password);
-            showToast('Đăng nhập thành công', 'success');
-            window.location.hash = 'dashboard';
-            window.dispatchEvent(new Event('auth-changed'));
-        } catch(err) {
-            showToast(err.message, 'error');
-        }
-    };
-    document.getElementById('goto-register').onclick = () => {
-        window.location.hash = 'register';
-        window.dispatchEvent(new Event('auth-changed'));
-    };
+  document.getElementById("login-btn").onclick = async () => {
+    const username = document.getElementById("login-username").value.trim();
+    const password = document.getElementById("login-password").value;
+    if (!username || !password) return showToast("Nhập đầy đủ", "warning");
+    try {
+      await login(username, password);
+      showToast("Đăng nhập thành công", "success");
+      window.location.hash = "dashboard";
+      window.dispatchEvent(new Event("auth-changed"));
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+  document.getElementById("goto-register").onclick = () => {
+    window.location.hash = "register";
+    window.dispatchEvent(new Event("auth-changed"));
+  };
 }

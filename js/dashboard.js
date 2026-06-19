@@ -5,8 +5,8 @@
  * Sử dụng API backend thay vì state.js.
  */
 
-import { getGreenhouses, getGreenhouseIdByZoneId, getZoneName, getZoneById } from './utils.js';
-import { getDevices, getAlerts, getSensorData, getZones } from './api.js';
+import { buildZoneTree, getGreenhouses, getGreenhouseIdByZoneId } from "./utils.js";
+import { getDevices, getAlerts, getSensorData, getZones } from "./api.js";
 
 // --- Biến toàn cục ---
 let areaChart, radarChart, lineChart;
@@ -21,266 +21,341 @@ let sensorData = [];
  * Tạo nhãn thời gian cho 24 giờ (dựa trên giờ hiện tại, quay ngược 23 giờ)
  */
 function generateTimeLabels() {
-    const now = new Date();
-    return Array.from({ length: 24 }, (_, i) => {
-        const hour = (now.getHours() - 23 + i + 24) % 24;
-        return `${hour}:00`;
-    });
+  const now = new Date();
+  return Array.from({ length: 24 }, (_, i) => {
+    const hour = (now.getHours() - 23 + i + 24) % 24;
+    return `${hour}:00`;
+  });
 }
 
 // ===================== LẤY DỮ LIỆU =====================
 async function loadDashboardData() {
-    try {
-        [devices, alerts, zones] = await Promise.all([
-            getDevices(),
-            getAlerts(),
-            getZones()
-        ]);
-        greenhouses = getGreenhouses(zones);
-        // Đảm bảo currentGreenhouseId vẫn hợp lệ sau khi load
-        if (greenhouses.length > 0) {
-            const saved = localStorage.getItem('selectedGreenhouse');
-            if (saved && greenhouses.some(g => String(g.id) === String(saved))) {
-                currentGreenhouseId = String(saved);
-            } else if (!currentGreenhouseId || !greenhouses.some(g => String(g.id) === String(currentGreenhouseId))) {
-                currentGreenhouseId = String(greenhouses[0].id);
-            }
-            sensorData = await getSensorData(currentGreenhouseId);
-        }
-    } catch (err) {
-        console.error('Lỗi load dashboard data:', err);
-        throw err;
+  try {
+    const [loadedDevices, loadedAlerts, flatZones] = await Promise.all([
+      getDevices(),
+      getAlerts(),
+      getZones()
+    ]);
+    devices = loadedDevices;
+    alerts = loadedAlerts;
+    zones = buildZoneTree(flatZones);
+    greenhouses = getGreenhouses(zones);
+    // Đảm bảo currentGreenhouseId vẫn hợp lệ sau khi load
+    if (greenhouses.length > 0) {
+      const saved = localStorage.getItem("selectedGreenhouse");
+      if (saved && greenhouses.some((g) => String(g.id) === String(saved))) {
+        currentGreenhouseId = String(saved);
+      } else if (
+        !currentGreenhouseId ||
+        !greenhouses.some((g) => String(g.id) === String(currentGreenhouseId))
+      ) {
+        currentGreenhouseId = String(greenhouses[0].id);
+      }
+      sensorData = await getSensorData(currentGreenhouseId);
     }
+  } catch (err) {
+    console.error("Lỗi load dashboard data:", err);
+    throw err;
+  }
 }
 
 // ===================== LẤY ZONE THEO GREENHOUSE =====================
 function getZonesByGreenhouse(greenhouseId) {
-    const result = [];
-    function traverse(nodes) {
-        for (const node of nodes) {
-            if (node.type === 'zone') {
-                const ghId = getGreenhouseIdByZoneId(node.id, zones); // truyền zones vào
-                if (String(ghId) === String(greenhouseId)) {
-                    result.push(node);
-                }
-            }
-            if (node.children) traverse(node.children);
+  const result = [];
+  function traverse(nodes) {
+    for (const node of nodes) {
+      if (node.type === "zone") {
+        const ghId = getGreenhouseIdByZoneId(node.id, zones); // truyền zones vào
+        if (String(ghId) === String(greenhouseId)) {
+          result.push(node);
         }
+      }
+      if (node.children) traverse(node.children);
     }
-    traverse(zones);
-    return result;
+  }
+  traverse(zones);
+  return result;
 }
 
 // ===================== TÍNH TOÁN DỮ LIỆU THỐNG KÊ =====================
 function getStatsForGreenhouse(greenhouseId) {
-    const ghId = String(greenhouseId);
-    const zoneList = getZonesByGreenhouse(ghId);
-    const zoneIds = zoneList.map(z => String(z.id));
+  const ghId = String(greenhouseId);
+  const zoneList = getZonesByGreenhouse(ghId);
+  const zoneIds = zoneList.map((z) => String(z.id));
 
-    // Thiết bị
-    const devsInGh = devices.filter(d => zoneIds.includes(String(d.zone_id)));
-    const totalDevices = devsInGh.length;
-    const activeDevices = devsInGh.filter(d => d.status === 'ONLINE').length;
-    const offlineDevices = devsInGh.filter(d => d.status === 'OFFLINE').length;
-    const needReplace = devsInGh.filter(d => d.status === 'NEEDS_REPLACEMENT').length;
+  // Thiết bị
+  const devsInGh = devices.filter((d) => zoneIds.includes(String(d.zone_id)));
+  const totalDevices = devsInGh.length;
+  const activeDevices = devsInGh.filter((d) => d.status === "ONLINE").length;
+  const offlineDevices = devsInGh.filter((d) => d.status === "OFFLINE").length;
+  const needReplace = devsInGh.filter((d) => d.status === "NEEDS_REPLACEMENT").length;
 
-    // Cảnh báo
-    const alertsInGh = alerts.filter(a => zoneIds.includes(String(a.zone_id)));
-    const criticalAlerts = alertsInGh.filter(a => a.severity === 'critical' && a.status !== 'resolved').length;
-    const warningAlerts = alertsInGh.filter(a => a.severity === 'warning' && a.status !== 'resolved').length;
-    const infoAlerts = alertsInGh.filter(a => a.severity === 'info' && a.status !== 'resolved').length;
+  // Cảnh báo
+  const alertsInGh = alerts.filter((a) => zoneIds.includes(String(a.zone_id)));
+  const criticalAlerts = alertsInGh.filter(
+    (a) => a.severity === "critical" && a.status !== "resolved"
+  ).length;
+  const warningAlerts = alertsInGh.filter(
+    (a) => a.severity === "warning" && a.status !== "resolved"
+  ).length;
+  const infoAlerts = alertsInGh.filter(
+    (a) => a.severity === "info" && a.status !== "resolved"
+  ).length;
 
-    // Zone đang trồng
-    const zonesWithRecipe = zoneList.filter(z => z.recipe_id);
+  // Zone đang trồng
+  const zonesWithRecipe = zoneList.filter((z) => z.recipe_id);
 
-    // Nhiệt độ / độ ẩm trung bình
-    let avgTemp = 0, avgHum = 0;
-    const zonesWithTemp = zoneList.filter(z => z.temperature !== undefined && z.humidity !== undefined);
-    if (zonesWithTemp.length > 0) {
-        avgTemp = zonesWithTemp.reduce((sum, z) => sum + z.temperature, 0) / zonesWithTemp.length;
-        avgHum = zonesWithTemp.reduce((sum, z) => sum + z.humidity, 0) / zonesWithTemp.length;
-    }
+  // Nhiệt độ / độ ẩm trung bình
+  let avgTemp = 0,
+    avgHum = 0;
+  const zonesWithTemp = zoneList.filter(
+    (z) =>
+      z.temperature !== undefined &&
+      z.temperature !== null &&
+      z.humidity !== undefined &&
+      z.humidity !== null
+  );
+  if (zonesWithTemp.length > 0) {
+    avgTemp =
+      zonesWithTemp.reduce((sum, z) => sum + Number(z.temperature), 0) / zonesWithTemp.length;
+    avgHum = zonesWithTemp.reduce((sum, z) => sum + Number(z.humidity), 0) / zonesWithTemp.length;
+  }
 
-    return {
-        avgTemp,
-        avgHum,
-        totalDevices,
-        activeDevices,
-        offlineDevices,
-        needReplace,
-        criticalAlerts,
-        warningAlerts,
-        infoAlerts,
-        zonesWithRecipe: zonesWithRecipe.length,
-        totalZones: zoneList.length
-    };
+  return {
+    avgTemp,
+    avgHum,
+    totalDevices,
+    activeDevices,
+    offlineDevices,
+    needReplace,
+    criticalAlerts,
+    warningAlerts,
+    infoAlerts,
+    zonesWithRecipe: zonesWithRecipe.length,
+    totalZones: zoneList.length
+  };
 }
 
 // ===================== DỮ LIỆU BIỂU ĐỒ =====================
 function getChartData(greenhouseId) {
-    const rows = sensorData.filter(row => String(row.greenhouseId) === String(greenhouseId));
-    const timestamps = [...new Set(rows.map(row => new Date(row.timestamp).getTime()))].sort((a, b) => a - b);
-    const labels = timestamps.map(ts => new Date(ts).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
-    const series = metric => timestamps.map(ts => {
-        const row = rows.find(item => new Date(item.timestamp).getTime() === ts && item.metricType === metric);
-        return row ? Number(row.value) : null;
+  const rows = sensorData.filter((row) => String(row.greenhouseId) === String(greenhouseId));
+  const bucketSizeMs = 10000;
+  const buckets = new Map();
+
+  for (const row of rows) {
+    const timestamp = new Date(row.timestamp).getTime();
+    if (!Number.isFinite(timestamp)) continue;
+    const bucketTime = Math.floor(timestamp / bucketSizeMs) * bucketSizeMs;
+    if (!buckets.has(bucketTime)) buckets.set(bucketTime, new Map());
+    const metrics = buckets.get(bucketTime);
+    if (!metrics.has(row.metricType)) metrics.set(row.metricType, []);
+    metrics.get(row.metricType).push(Number(row.value));
+  }
+
+  const timestamps = [...buckets.keys()].sort((a, b) => a - b);
+  const labels = timestamps.map((ts) =>
+    new Date(ts).toLocaleTimeString("vi-VN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    })
+  );
+  const series = (metric) =>
+    timestamps.map((ts) => {
+      const values = buckets.get(ts).get(metric);
+      if (!values?.length) return null;
+      return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2));
     });
-    return {
-        labels,
-        tempData: series('Temperature'),
-        humData: series('Humidity'),
-        lightData: series('Light'),
-        co2Data: series('CO2')
-    };
+  return {
+    labels,
+    tempData: series("Temperature"),
+    humData: series("Humidity"),
+    lightData: series("Light"),
+    co2Data: series("CO2")
+  };
 }
 
 // ===================== BIỂU ĐỒ =====================
 function destroyCharts() {
-    if (areaChart) { areaChart.destroy(); areaChart = null; }
-    if (radarChart) { radarChart.destroy(); radarChart = null; }
-    if (lineChart) { lineChart.destroy(); lineChart = null; }
+  if (areaChart) {
+    areaChart.destroy();
+    areaChart = null;
+  }
+  if (radarChart) {
+    radarChart.destroy();
+    radarChart = null;
+  }
+  if (lineChart) {
+    lineChart.destroy();
+    lineChart = null;
+  }
 }
 
 function initCharts(data, stats) {
-    const labels = data.labels;
-    const { tempData, humData, lightData, co2Data } = data;
+  const labels = data.labels;
+  const { tempData, humData, lightData, co2Data } = data;
 
-    // 1. Area chart
-    const areaCtx = document.getElementById('areaChart')?.getContext('2d');
-    if (areaCtx) {
-        areaChart = new Chart(areaCtx, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: 'Nhiệt độ (°C)',
-                        data: tempData,
-                        borderColor: '#f59e0b',
-                        backgroundColor: 'rgba(245,158,11,0.15)',
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 0
-                    },
-                    {
-                        label: 'Độ ẩm (%)',
-                        data: humData,
-                        borderColor: '#3b82f6',
-                        backgroundColor: 'rgba(59,130,246,0.15)',
-                        fill: true,
-                        tension: 0.4,
-                        pointRadius: 0
-                    }
-                ]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-        });
-    }
+  // 1. Area chart
+  const areaCtx = document.getElementById("areaChart")?.getContext("2d");
+  if (areaCtx) {
+    areaChart = new Chart(areaCtx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Nhiệt độ (°C)",
+            data: tempData,
+            borderColor: "#f59e0b",
+            backgroundColor: "rgba(245,158,11,0.15)",
+            fill: true,
+            tension: 0.4,
+            pointRadius: 0
+          },
+          {
+            label: "Độ ẩm (%)",
+            data: humData,
+            borderColor: "#3b82f6",
+            backgroundColor: "rgba(59,130,246,0.15)",
+            fill: true,
+            tension: 0.4,
+            pointRadius: 0
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "bottom" } }
+      }
+    });
+  }
 
-    // 2. Radar chart
-    const radarCtx = document.getElementById('radarChart')?.getContext('2d');
-    if (radarCtx) {
-        const avgTemp = stats.avgTemp;
-        const avgHum = stats.avgHum;
-        const norm = (val, min, max) => Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
-        const tempScore = norm(avgTemp, 15, 35);
-        const humScore = norm(avgHum, 40, 90);
-        const latest = metric => [...sensorData].reverse().find(row => row.metricType === metric)?.value;
-        const lightScore = norm(Number(latest('Light') || 0), 0, 1000);
-        const co2Score = norm(Number(latest('CO2') || 0), 300, 1200);
-        const phScore = norm(Number(latest('PH') || 0), 4, 9);
+  // 2. Radar chart
+  const radarCtx = document.getElementById("radarChart")?.getContext("2d");
+  if (radarCtx) {
+    const avgTemp = stats.avgTemp;
+    const avgHum = stats.avgHum;
+    const norm = (val, min, max) => Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
+    const tempScore = norm(avgTemp, 15, 35);
+    const humScore = norm(avgHum, 40, 90);
+    const latest = (metric) =>
+      [...sensorData]
+        .reverse()
+        .find(
+          (row) =>
+            String(row.greenhouseId) === String(currentGreenhouseId) && row.metricType === metric
+        )?.value;
+    const lightScore = norm(Number(latest("Light") || 0), 0, 1000);
+    const co2Score = norm(Number(latest("CO2") || 0), 300, 1200);
+    const phScore = norm(Number(latest("PH") || 0), 4, 9);
 
-        radarChart = new Chart(radarCtx, {
-            type: 'radar',
-            data: {
-                labels: ['Nhiệt độ', 'Độ ẩm', 'Ánh sáng', 'CO2', 'pH đất'],
-                datasets: [
-                    {
-                        label: 'Thực tế',
-                        data: [tempScore, humScore, lightScore, co2Score, phScore],
-                        borderColor: '#10b981',
-                        backgroundColor: 'rgba(16,185,129,0.4)',
-                        pointBackgroundColor: '#10b981'
-                    },
-                    {
-                        label: 'Tối ưu',
-                        data: [85, 80, 75, 80, 85],
-                        borderColor: '#3b82f6',
-                        backgroundColor: 'rgba(59,130,246,0.2)',
-                        pointBackgroundColor: '#3b82f6'
-                    }
-                ]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-        });
-    }
+    radarChart = new Chart(radarCtx, {
+      type: "radar",
+      data: {
+        labels: ["Nhiệt độ", "Độ ẩm", "Ánh sáng", "CO2", "pH đất"],
+        datasets: [
+          {
+            label: "Thực tế",
+            data: [tempScore, humScore, lightScore, co2Score, phScore],
+            borderColor: "#10b981",
+            backgroundColor: "rgba(16,185,129,0.4)",
+            pointBackgroundColor: "#10b981"
+          },
+          {
+            label: "Tối ưu",
+            data: [85, 80, 75, 80, 85],
+            borderColor: "#3b82f6",
+            backgroundColor: "rgba(59,130,246,0.2)",
+            pointBackgroundColor: "#3b82f6"
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "bottom" } }
+      }
+    });
+  }
 
-    // 3. Line chart
-    const lineCtx = document.getElementById('lineChart')?.getContext('2d');
-    if (lineCtx) {
-        lineChart = new Chart(lineCtx, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: 'Ánh sáng (lux)',
-                        data: lightData,
-                        borderColor: '#f59e0b',
-                        tension: 0.4,
-                        pointRadius: 0,
-                        yAxisID: 'y'
-                    },
-                    {
-                        label: 'CO2 (ppm)',
-                        data: co2Data,
-                        borderColor: '#10b981',
-                        tension: 0.4,
-                        pointRadius: 0,
-                        yAxisID: 'y1'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { position: 'bottom' } },
-                scales: {
-                    y: { position: 'left', title: { display: true, text: 'Ánh sáng (lux)' } },
-                    y1: { position: 'right', title: { display: true, text: 'CO2 (ppm)' }, grid: { drawOnChartArea: false } }
-                }
-            }
-        });
-    }
+  // 3. Line chart
+  const lineCtx = document.getElementById("lineChart")?.getContext("2d");
+  if (lineCtx) {
+    lineChart = new Chart(lineCtx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Ánh sáng (lux)",
+            data: lightData,
+            borderColor: "#f59e0b",
+            tension: 0.4,
+            pointRadius: 0,
+            yAxisID: "y"
+          },
+          {
+            label: "CO2 (ppm)",
+            data: co2Data,
+            borderColor: "#10b981",
+            tension: 0.4,
+            pointRadius: 0,
+            yAxisID: "y1"
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "bottom" } },
+        scales: {
+          y: {
+            position: "left",
+            title: { display: true, text: "Ánh sáng (lux)" }
+          },
+          y1: {
+            position: "right",
+            title: { display: true, text: "CO2 (ppm)" },
+            grid: { drawOnChartArea: false }
+          }
+        }
+      }
+    });
+  }
 }
 
 // ===================== RENDER =====================
 export async function renderDashboardPage() {
-    const container = document.getElementById('page-dashboard');
-    if (!container) return;
+  const container = document.getElementById("page-dashboard");
+  if (!container) return;
 
-    try {
-        await loadDashboardData();
-    } catch (err) {
-        container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
-        return;
-    }
+  try {
+    await loadDashboardData();
+  } catch (err) {
+    container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
+    return;
+  }
 
-    if (greenhouses.length === 0) {
-        container.innerHTML = '<div class="card" style="padding:20px; text-align:center;">Không có dữ liệu nhà kính</div>';
-        return;
-    }
+  if (greenhouses.length === 0) {
+    container.innerHTML =
+      '<div class="card" style="padding:20px; text-align:center;">Không có dữ liệu nhà kính</div>';
+    return;
+  }
 
-    // Đảm bảo currentGreenhouseId hợp lệ
-    if (!currentGreenhouseId || !greenhouses.some(g => String(g.id) === String(currentGreenhouseId))) {
-        currentGreenhouseId = String(greenhouses[0].id);
-    }
+  // Đảm bảo currentGreenhouseId hợp lệ
+  if (
+    !currentGreenhouseId ||
+    !greenhouses.some((g) => String(g.id) === String(currentGreenhouseId))
+  ) {
+    currentGreenhouseId = String(greenhouses[0].id);
+  }
 
-    const stats = getStatsForGreenhouse(currentGreenhouseId);
-    const chartData = getChartData(currentGreenhouseId);
+  const stats = getStatsForGreenhouse(currentGreenhouseId);
+  const chartData = getChartData(currentGreenhouseId);
 
-    // Xây dựng giao diện
-    container.innerHTML = `
+  // Xây dựng giao diện
+  container.innerHTML = `
         <div class="page-header" style="position: relative;">
             <div>
                 <div class="page-title">Dashboard Tổng quan</div>
@@ -289,7 +364,7 @@ export async function renderDashboardPage() {
             <div style="position: absolute; top: 0; right: 0;">
                 <label style="font-size:0.85rem; color:#6b7280; margin-right:8px;">🏠 Nhà kính:</label>
                 <select id="greenhouse-select" class="form-select" style="width:auto; display:inline-block;" aria-label="Chọn nhà kính">
-                    ${greenhouses.map(gh => `<option value="${gh.id}" ${String(gh.id) === String(currentGreenhouseId) ? 'selected' : ''}>${gh.name}</option>`).join('')}
+                    ${greenhouses.map((gh) => `<option value="${gh.id}" ${String(gh.id) === String(currentGreenhouseId) ? "selected" : ""}>${gh.name}</option>`).join("")}
                 </select>
             </div>
         </div>
@@ -300,13 +375,13 @@ export async function renderDashboardPage() {
                 <div class="stat-icon" style="background:#fef3c7;color:#f59e0b">🌡️</div>
                 <div class="stat-label">Nhiệt độ TB</div>
                 <div class="stat-value">${stats.avgTemp.toFixed(1)}°C</div>
-                <span class="chip chip-default" style="margin-top:6px">${stats.avgTemp > 28 ? 'Cao' : stats.avgTemp < 18 ? 'Thấp' : 'Bình thường'}</span>
+                <span class="chip chip-default" style="margin-top:6px">${stats.avgTemp > 28 ? "Cao" : stats.avgTemp < 18 ? "Thấp" : "Bình thường"}</span>
             </div>
             <div class="card">
                 <div class="stat-icon" style="background:#dbeafe;color:#3b82f6">💧</div>
                 <div class="stat-label">Độ ẩm TB</div>
                 <div class="stat-value">${stats.avgHum.toFixed(1)}%</div>
-                <span class="chip chip-default" style="margin-top:6px">${stats.avgHum > 80 ? 'Cao' : stats.avgHum < 60 ? 'Thấp' : 'Bình thường'}</span>
+                <span class="chip chip-default" style="margin-top:6px">${stats.avgHum > 80 ? "Cao" : stats.avgHum < 60 ? "Thấp" : "Bình thường"}</span>
             </div>
             <div class="card">
                 <div class="stat-icon" style="background:#dbeafe;color:#3b82f6">🔌</div>
@@ -355,20 +430,20 @@ export async function renderDashboardPage() {
         </div>
     `;
 
-    destroyCharts();
-    initCharts(chartData, stats);
+  destroyCharts();
+  initCharts(chartData, stats);
 
-    // Sự kiện đổi greenhouse
-    const select = document.getElementById('greenhouse-select');
-    // Xóa event cũ để tránh duplicate
-    select.replaceWith(select.cloneNode(true));
-    const newSelect = document.getElementById('greenhouse-select');
-    newSelect.addEventListener('change', (e) => {
-        const newId = e.target.value;
-        currentGreenhouseId = String(newId);
-        localStorage.setItem('selectedGreenhouse', newId);
-        renderDashboardPage();
-    });
+  // Sự kiện đổi greenhouse
+  const select = document.getElementById("greenhouse-select");
+  // Xóa event cũ để tránh duplicate
+  select.replaceWith(select.cloneNode(true));
+  const newSelect = document.getElementById("greenhouse-select");
+  newSelect.addEventListener("change", (e) => {
+    const newId = e.target.value;
+    currentGreenhouseId = String(newId);
+    localStorage.setItem("selectedGreenhouse", newId);
+    renderDashboardPage();
+  });
 }
 
 // Export các hàm cần thiết

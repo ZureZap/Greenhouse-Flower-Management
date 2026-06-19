@@ -1,9 +1,14 @@
-import { register } from '../auth.js';
-import { showToast } from '../app.js';
+/**
+ * register.js
+ * Render biểu mẫu đăng ký và gửi tài khoản mới vào hàng chờ phê duyệt.
+ */
+
+import { register } from "../auth.js";
+import { showToast } from "../app.js";
 
 export function renderRegisterPage() {
-    const container = document.getElementById('page-register');
-    container.innerHTML = `
+  const container = document.getElementById("page-register");
+  container.innerHTML = `
         <div style="display:flex; justify-content:center; align-items:center; min-height:80vh;">
             <div class="card" style="width:450px;">
                 <div class="card-title" style="text-align:center">📝 Đăng ký</div>
@@ -42,28 +47,29 @@ export function renderRegisterPage() {
             </div>
         </div>
     `;
-    document.getElementById('register-btn').onclick = async () => {
-        const username = document.getElementById('reg-username').value.trim();
-        const email = document.getElementById('reg-email').value.trim();
-        const phone = document.getElementById('reg-phone').value.trim();
-        const password = document.getElementById('reg-password').value;
-        const confirm = document.getElementById('reg-confirm').value;
-        const role = document.getElementById('reg-role').value;
-        if (!username || !email || !phone || !password) return showToast('Nhập đủ thông tin', 'warning');
-        if (password !== confirm) return showToast('Mật khẩu không khớp', 'warning');
-        try {
-            await register({ username, email, phone, password, role });
-            showToast('Đăng ký thành công! Tài khoản đang chờ chủ trang trại phê duyệt.', 'info');
-                setTimeout(() => {
-                    window.location.hash = 'login';
-                    window.dispatchEvent(new Event('auth-changed'));
-                }, 3000);
-        } catch(err) {
-            showToast(err.message, 'error');
-        }
-    };
-    document.getElementById('back-login').onclick = () => {
-        window.location.hash = 'login';
-        window.dispatchEvent(new Event('auth-changed'));
-    };
+  document.getElementById("register-btn").onclick = async () => {
+    const username = document.getElementById("reg-username").value.trim();
+    const email = document.getElementById("reg-email").value.trim();
+    const phone = document.getElementById("reg-phone").value.trim();
+    const password = document.getElementById("reg-password").value;
+    const confirm = document.getElementById("reg-confirm").value;
+    const role = document.getElementById("reg-role").value;
+    if (!username || !email || !phone || !password)
+      return showToast("Nhập đủ thông tin", "warning");
+    if (password !== confirm) return showToast("Mật khẩu không khớp", "warning");
+    try {
+      await register({ username, email, phone, password, role });
+      showToast("Đăng ký thành công! Tài khoản đang chờ chủ trang trại phê duyệt.", "info");
+      setTimeout(() => {
+        window.location.hash = "login";
+        window.dispatchEvent(new Event("auth-changed"));
+      }, 3000);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+  document.getElementById("back-login").onclick = () => {
+    window.location.hash = "login";
+    window.dispatchEvent(new Event("auth-changed"));
+  };
 }
