@@ -15,6 +15,7 @@ import { renderLoginPage } from "./pages/login.js";
 import { renderRegisterPage } from "./pages/register.js";
 import { renderUserApprovalPage } from "./pages/userApproval.js";
 import { isLoggedIn, logout, getCurrentUser } from "./auth.js";
+import { changePassword } from "./api.js";
 
 // ===================== TIỆN ÍCH CHUNG =====================
 
@@ -72,6 +73,10 @@ function handleRoute() {
     window.location.hash = "dashboard";
     return;
   }
+  if (isAuth && hash === "user-approval" && getCurrentUser()?.role !== "OWNER") {
+    window.location.hash = "dashboard";
+    return;
+  }
   // Cập nhật active menu (chỉ khi đã đăng nhập và không phải public)
   if (isAuth && !isPublic) {
     document.querySelectorAll(".nav-item").forEach((item) => {
@@ -95,9 +100,9 @@ function addLogoutButton() {
   logoutBtn.className = "nav-item";
   logoutBtn.href = "#";
   logoutBtn.innerHTML = '<span class="nav-icon">🚪</span> Đăng xuất';
-  logoutBtn.addEventListener("click", (e) => {
+  logoutBtn.addEventListener("click", async (e) => {
     e.preventDefault();
-    logout();
+    await logout();
     isAuth = false;
     window.location.hash = "login";
     window.dispatchEvent(new Event("auth-changed"));
@@ -118,7 +123,7 @@ function addOwnerMenu() {
     approvalItem.id = "owner-approval-item";
     approvalItem.className = "nav-item";
     approvalItem.href = "#";
-    approvalItem.innerHTML = '<span class="nav-icon">📋</span> Danh sách tài khoản';
+    approvalItem.innerHTML = '<span class="nav-icon">👥</span> Quản lý tài khoản';
     approvalItem.addEventListener("click", (e) => {
       e.preventDefault();
       window.location.hash = "user-approval";
@@ -130,14 +135,74 @@ function addOwnerMenu() {
   }
 }
 
+function addChangePasswordMenu() {
+  const nav = document.querySelector(".sidebar-nav");
+  if (!nav || document.getElementById("change-password-item")) return;
+  const item = document.createElement("a");
+  item.id = "change-password-item";
+  item.className = "nav-item";
+  item.href = "#";
+  item.innerHTML = '<span class="nav-icon">🔑</span> Đổi mật khẩu';
+  item.addEventListener("click", (event) => {
+    event.preventDefault();
+    openChangePasswordModal();
+  });
+  const logoutItem = document.getElementById("logout-item");
+  if (logoutItem) nav.insertBefore(item, logoutItem);
+  else nav.appendChild(item);
+}
+
+function openChangePasswordModal() {
+  document.getElementById("change-password-modal")?.remove();
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `<div class="modal-overlay" id="change-password-modal">
+      <div class="modal" style="width:450px;max-width:95vw">
+        <div class="modal-title">Đổi mật khẩu</div>
+        <div class="form-group"><label class="form-label">Mật khẩu cũ</label>
+          <input class="form-input" id="old-password" type="password" autocomplete="current-password"></div>
+        <div class="form-group"><label class="form-label">Mật khẩu mới</label>
+          <input class="form-input" id="new-password" type="password" autocomplete="new-password"></div>
+        <div class="form-group"><label class="form-label">Nhập lại mật khẩu mới</label>
+          <input class="form-input" id="confirm-password" type="password" autocomplete="new-password"></div>
+        <div class="modal-actions">
+          <button class="btn btn-outline" id="cancel-change-password">Hủy</button>
+          <button class="btn btn-primary" id="save-change-password">Đổi mật khẩu</button>
+        </div>
+      </div>
+    </div>`
+  );
+  const modal = document.getElementById("change-password-modal");
+  openModal("change-password-modal");
+  document.getElementById("cancel-change-password").addEventListener("click", () => modal.remove());
+  document.getElementById("save-change-password").addEventListener("click", async () => {
+    const oldPassword = document.getElementById("old-password").value;
+    const newPassword = document.getElementById("new-password").value;
+    const confirmPassword = document.getElementById("confirm-password").value;
+    try {
+      await changePassword(oldPassword, newPassword, confirmPassword);
+      modal.remove();
+      showToast("Đổi mật khẩu thành công");
+    } catch (err) {
+      showToast("Lỗi đổi mật khẩu: " + err.message, "error");
+    }
+  });
+}
+
 function toggleSidebar() {
   const sidebar = document.getElementById("sidebar");
   if (isAuth) {
     sidebar.style.display = "flex";
     addLogoutButton();
+    addChangePasswordMenu();
+    const ownerItem = document.getElementById("owner-approval-item");
+    if (getCurrentUser()?.role !== "OWNER") ownerItem?.remove();
     addOwnerMenu();
   } else {
     sidebar.style.display = "none";
+    document.getElementById("owner-approval-item")?.remove();
+    document.getElementById("change-password-item")?.remove();
+    document.getElementById("logout-item")?.remove();
   }
 }
 

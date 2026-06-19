@@ -12,8 +12,7 @@ const METRIC_DEFAULTS = {
   SoilHumidity: { base: 68, drift: 3, min: 0, max: 100 },
   Light: { base: 550, drift: 80, min: 0, max: 2000 },
   CO2: { base: 700, drift: 70, min: 200, max: 2000 },
-  PH: { base: 6.3, drift: 0.2, min: 0, max: 14 },
-  EC: { base: 1.8, drift: 0.15, min: 0, max: 10 }
+  PH: { base: 6.3, drift: 0.2, min: 0, max: 14 }
 };
 
 const ACTUATOR_MAP = {
@@ -190,6 +189,7 @@ class BackendSimulator {
 
     const direction = classifyReading(value, context.minValue, context.maxValue);
     const alert = await this.syncAlert(pool, context, value, direction, source);
+    await this.syncZoneStatus(pool, context.zoneId);
     const controls = await this.syncControls(pool, context, direction);
     return {
       deviceId: context.deviceId,
@@ -272,6 +272,26 @@ class BackendSimulator {
     return { action: "created", id: inserted.recordset[0].id, severity };
   }
 
+  async syncZoneStatus(pool, zoneId) {
+    await pool.request().input("zoneId", this.sql.Int, zoneId).query(`
+      UPDATE Zone
+      SET status = CASE
+        WHEN EXISTS (
+          SELECT 1 FROM AlertLog
+          WHERE zone_id = @zoneId AND status <> 'RESOLVED'
+            AND LEFT(message, 6) = '[AUTO:' AND severity = 'CRITICAL'
+        ) THEN 'high'
+        WHEN EXISTS (
+          SELECT 1 FROM AlertLog
+          WHERE zone_id = @zoneId AND status <> 'RESOLVED'
+            AND LEFT(message, 6) = '[AUTO:' AND severity = 'WARNING'
+        ) THEN 'warning'
+        ELSE 'optimal'
+      END
+      WHERE zone_id = @zoneId
+    `);
+  }
+
   async syncControls(pool, context, direction) {
     const mapping = ACTUATOR_MAP[context.metricType];
     if (!mapping) return [];
@@ -307,9 +327,10 @@ class BackendSimulator {
       await pool
         .request()
         .input("deviceId", this.sql.Int, actuator.deviceId)
-        .input("action", this.sql.NVarChar, action)
-        .query(`INSERT INTO [Log] (device_id, user_id, action, triggered_by)
-                        VALUES (@deviceId, NULL, @action, 'SYSTEM')`);
+        .input("action", this.sql.NVarChar, action).query(`INSERT INTO [Log]
+                  (device_id, user_id, entity_type, entity_id, action, triggered_by)
+                VALUES
+                  (@deviceId, NULL, 'DEVICE', @deviceId, @action, 'SYSTEM')`);
       changed.push({
         deviceId: actuator.deviceId,
         active: shouldActivate,

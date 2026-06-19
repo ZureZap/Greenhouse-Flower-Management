@@ -1,6 +1,6 @@
 /**
  * devices.js
- * Quản lý trang Thiết bị IoT - thêm, sửa, xóa, phê duyệt, menu dropdown (⋯)
+ * Quản lý trang Thiết bị IoT - thêm, sửa, xóa và menu thao tác (⋯).
  * Hỗ trợ nhập MAC thủ công, auto-format, validation, kiểm tra trùng lặp,
  * và lọc theo greenhouse (qua zone_id).
  */
@@ -12,8 +12,6 @@ import {
   updateDevice,
   deleteDevice as deleteDeviceApi,
   getGateways,
-  getControlProperties,
-  updateControlProperty,
   getZones
 } from "./api.js";
 import {
@@ -25,12 +23,22 @@ import {
 } from "./utils.js";
 
 // ===================== BIẾN TOÀN CỤC =====================
-let pendingDeviceId = null;
 let filterGreenhouseId = null;
 let currentMenu = null;
 let devices = [];
 let gateways = [];
 let zones = [];
+let deviceSort = { key: "name", direction: "asc" };
+const deviceFilters = {
+  name: "",
+  device_type: "",
+  metric_type: "",
+  gateway: "",
+  zone: "",
+  status: "",
+  battery: "",
+  heartbeat: ""
+};
 
 // ===================== HÀM LẤY DỮ LIỆU =====================
 async function loadData() {
@@ -50,12 +58,17 @@ async function loadData() {
 }
 
 function getGatewayOptions() {
-  return gateways.map((g) => ({ id: g.id, name: g.name }));
+  return gateways.map((gateway) => ({
+    id: gateway.id,
+    name: gateway.name || gateway.address || `Gateway #${gateway.id}`
+  }));
 }
 
 function getGatewayName(gatewayId) {
-  const gw = gateways.find((g) => String(g.id) === String(gatewayId));
-  return gw ? gw.name : gatewayId;
+  const gateway = gateways.find((item) => String(item.id) === String(gatewayId));
+  return gateway
+    ? gateway.name || gateway.address || `Gateway #${gateway.id}`
+    : `Gateway #${gatewayId}`;
 }
 
 // ===================== TIỆN ÍCH HIỂN THỊ =====================
@@ -64,8 +77,7 @@ function deviceStatusChip(status) {
     ONLINE: ["chip-success", "✔ Hoạt động"],
     OFFLINE: ["chip-warning", "⚠ Mất kết nối"],
     ERROR: ["chip-error", "✖ Lỗi"],
-    NEEDS_REPLACEMENT: ["chip-error", "✖ Cần thay thế"],
-    PENDING: ["chip-default", "⏳ Chờ phê duyệt"]
+    NEEDS_REPLACEMENT: ["chip-error", "✖ Cần thay thế"]
   };
   const [chipClass, chipText] = statusMap[status] || ["chip-default", status];
   return `<span class="chip ${chipClass}">${chipText}</span>`;
@@ -77,6 +89,62 @@ function batteryChip(batteryLevel) {
   if (batteryLevel <= 50) chipClass = "chip-warning";
   if (batteryLevel <= 20) chipClass = "chip-error";
   return `<span class="chip ${chipClass}">${batteryLevel}%</span>`;
+}
+
+function getDeviceColumnValue(device, key) {
+  const values = {
+    name: device.name || "",
+    device_type: device.device_type || "",
+    metric_type: device.metric_type || "",
+    gateway: getGatewayName(device.gateway_id),
+    zone: getZoneName(device.zone_id, zones),
+    status: device.status || "",
+    battery: device.batteryLevel ?? -1,
+    heartbeat: device.lastHeartbeat ? new Date(device.lastHeartbeat).getTime() : -1
+  };
+  return values[key];
+}
+
+function applyDeviceColumnFilters(items) {
+  return items.filter((device) =>
+    Object.entries(deviceFilters).every(([key, filterValue]) => {
+      const query = filterValue.trim().toLocaleLowerCase("vi-VN");
+      if (!query) return true;
+      let value = getDeviceColumnValue(device, key);
+      if (key === "heartbeat" && Number(value) >= 0) {
+        value = new Date(value).toLocaleString("vi-VN");
+      }
+      return String(value).toLocaleLowerCase("vi-VN").includes(query);
+    })
+  );
+}
+
+function sortDevices(items) {
+  const direction = deviceSort.direction === "asc" ? 1 : -1;
+  return items
+    .map((device, originalIndex) => ({ device, originalIndex }))
+    .sort((left, right) => {
+      const leftValue = getDeviceColumnValue(left.device, deviceSort.key);
+      const rightValue = getDeviceColumnValue(right.device, deviceSort.key);
+      let comparison;
+      if (typeof leftValue === "number" && typeof rightValue === "number") {
+        comparison = leftValue - rightValue;
+      } else {
+        comparison = String(leftValue).localeCompare(String(rightValue), "vi", {
+          numeric: true,
+          sensitivity: "base"
+        });
+      }
+      return comparison === 0 ? left.originalIndex - right.originalIndex : comparison * direction;
+    })
+    .map(({ device }) => device);
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll("[data-sort-indicator]").forEach((indicator) => {
+    const isActive = indicator.dataset.sortIndicator === deviceSort.key;
+    indicator.textContent = isActive ? (deviceSort.direction === "asc" ? "▲" : "▼") : "↕";
+  });
 }
 
 // ===================== HÀM XỬ LÝ MAC =====================
@@ -97,7 +165,31 @@ function isValidMac(mac) {
 }
 
 function isMacExists(mac, excludeId = null) {
-  return devices.some((d) => d.macAddress === mac && d.id !== excludeId);
+  const normalizedMac = mac.trim().toUpperCase();
+  return devices.some(
+    (device) =>
+      String(device.id) !== String(excludeId) &&
+      String(device.macAddress || "")
+        .trim()
+        .toUpperCase() === normalizedMac
+  );
+}
+
+const METRICS_BY_DEVICE_TYPE = {
+  SENSOR: ["Temperature", "Humidity", "SoilHumidity", "Light", "CO2", "PH"],
+  OUTPUT_DEVICE: ["Heating", "Cooling", "Ventilation", "Irrigation", "Misting", "Lighting"]
+};
+
+function populateMetricSelect(deviceType, selectedMetric = "") {
+  const select = document.getElementById("dev-metric");
+  if (!select) return;
+  const metrics = METRICS_BY_DEVICE_TYPE[deviceType] || [];
+  select.innerHTML = metrics
+    .map(
+      (metric) =>
+        `<option value="${metric}" ${metric === selectedMetric ? "selected" : ""}>${metric}</option>`
+    )
+    .join("");
 }
 
 function validateMacInput() {
@@ -138,7 +230,7 @@ export async function renderDevicesPage() {
     return;
   }
 
-  const greenhouses = getGreenhouses();
+  const greenhouses = getGreenhouses(zones);
   const gatewaysOpt = getGatewayOptions();
 
   container.innerHTML = `
@@ -152,7 +244,12 @@ export async function renderDevicesPage() {
                     <label style="font-size:0.85rem; color:#6b7280; margin-right:6px;">🏠 Nhà kính:</label>
                     <select id="greenhouse-filter" class="form-select" style="width:auto; display:inline-block;">
                         <option value="">-- Tất cả --</option>
-                        ${greenhouses.map((gh) => `<option value="${gh.id}">${gh.name}</option>`).join("")}
+                        ${greenhouses
+                          .map(
+                            (gh) =>
+                              `<option value="${gh.id}" ${String(gh.id) === String(filterGreenhouseId) ? "selected" : ""}>${gh.name}</option>`
+                          )
+                          .join("")}
                     </select>
                 </div>
                 <button class="btn btn-primary" onclick="window.showAddDeviceModal()">➕ Thêm thiết bị</button>
@@ -165,15 +262,26 @@ export async function renderDevicesPage() {
                 <table>
                     <thead>
                         <tr>
-                            <th>Tên thiết bị</th>
-                            <th>Loại</th>
-                            <th>Metric</th>
-                            <th>Gateway</th>
-                            <th>Khu vực</th>
-                            <th>Trạng thái</th>
-                            <th>Pin</th>
-                            <th>Heartbeat cuối</th>
+                            <th><button class="table-sort" data-sort="name">Tên thiết bị <span data-sort-indicator="name">▲</span></button></th>
+                            <th><button class="table-sort" data-sort="device_type">Loại <span data-sort-indicator="device_type">↕</span></button></th>
+                            <th><button class="table-sort" data-sort="metric_type">Metric <span data-sort-indicator="metric_type">↕</span></button></th>
+                            <th><button class="table-sort" data-sort="gateway">Gateway <span data-sort-indicator="gateway">↕</span></button></th>
+                            <th><button class="table-sort" data-sort="zone">Khu vực <span data-sort-indicator="zone">↕</span></button></th>
+                            <th><button class="table-sort" data-sort="status">Trạng thái <span data-sort-indicator="status">↕</span></button></th>
+                            <th><button class="table-sort" data-sort="battery">Pin <span data-sort-indicator="battery">↕</span></button></th>
+                            <th><button class="table-sort" data-sort="heartbeat">Heartbeat cuối <span data-sort-indicator="heartbeat">↕</span></button></th>
                             <th>Thao tác</th>
+                        </tr>
+                        <tr class="table-filter-row">
+                            <th><input data-device-filter="name" placeholder="Lọc tên"></th>
+                            <th><input data-device-filter="device_type" placeholder="Lọc loại"></th>
+                            <th><input data-device-filter="metric_type" placeholder="Lọc metric"></th>
+                            <th><input data-device-filter="gateway" placeholder="Lọc gateway"></th>
+                            <th><input data-device-filter="zone" placeholder="Lọc khu vực"></th>
+                            <th><input data-device-filter="status" placeholder="Lọc trạng thái"></th>
+                            <th><input data-device-filter="battery" placeholder="Lọc pin"></th>
+                            <th><input data-device-filter="heartbeat" placeholder="Lọc thời gian"></th>
+                            <th><button class="btn btn-outline btn-sm" id="clear-device-filters">Xóa lọc</button></th>
                         </tr>
                     </thead>
                     <tbody id="device-table"></tbody>
@@ -181,7 +289,7 @@ export async function renderDevicesPage() {
             </div>
         </div>
 
-        <!-- Modal thêm / sửa / phê duyệt -->
+        <!-- Modal thêm / sửa thiết bị -->
         <div class="modal-overlay" id="device-modal">
             <div class="modal">
                 <div class="modal-title" id="device-modal-title">Thêm thiết bị mới</div>
@@ -198,13 +306,7 @@ export async function renderDevicesPage() {
                 </div>
                 <div class="form-group">
                     <label class="form-label">Loại dữ liệu (Metric)</label>
-                    <select class="form-select" id="dev-metric">
-                        <option value="Temperature">Nhiệt độ</option>
-                        <option value="Humidity">Độ ẩm</option>
-                        <option value="Light">Ánh sáng</option>
-                        <option value="CO2">CO2</option>
-                        <option value="Actuator">Điều khiển</option>
-                    </select>
+                    <select class="form-select" id="dev-metric"></select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Gateway</label>
@@ -225,7 +327,7 @@ export async function renderDevicesPage() {
                 </div>
                 <div class="modal-actions">
                     <button class="btn btn-outline" onclick="closeModal('device-modal')">Hủy</button>
-                    <button class="btn btn-primary" onclick="window.approveDevice()">Lưu</button>
+                    <button class="btn btn-primary" onclick="window.saveDevice()">Lưu</button>
                 </div>
             </div>
         </div>
@@ -235,6 +337,39 @@ export async function renderDevicesPage() {
   const filterSelect = document.getElementById("greenhouse-filter");
   filterSelect.addEventListener("change", (e) => {
     filterGreenhouseId = e.target.value || null;
+    renderDevices();
+  });
+
+  const deviceTypeSelect = document.getElementById("dev-type");
+  deviceTypeSelect.addEventListener("change", (event) => {
+    populateMetricSelect(event.target.value);
+  });
+  populateMetricSelect(deviceTypeSelect.value);
+
+  document.querySelectorAll("[data-sort]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.sort;
+      deviceSort = {
+        key,
+        direction: deviceSort.key === key && deviceSort.direction === "asc" ? "desc" : "asc"
+      };
+      renderDevices();
+    });
+  });
+  document.querySelectorAll("[data-device-filter]").forEach((input) => {
+    input.value = deviceFilters[input.dataset.deviceFilter];
+    input.addEventListener("input", () => {
+      deviceFilters[input.dataset.deviceFilter] = input.value;
+      renderDevices();
+    });
+  });
+  document.getElementById("clear-device-filters").addEventListener("click", () => {
+    Object.keys(deviceFilters).forEach((key) => {
+      deviceFilters[key] = "";
+    });
+    document.querySelectorAll("[data-device-filter]").forEach((input) => {
+      input.value = "";
+    });
     renderDevices();
   });
 
@@ -252,6 +387,8 @@ export async function renderDevices() {
       return String(ghId) === String(filterGreenhouseId);
     });
   }
+  filteredDevices = sortDevices(applyDeviceColumnFilters(filteredDevices));
+  updateSortIndicators();
 
   // Cập nhật 4 card thống kê
   const statsContainer = document.getElementById("device-stats");
@@ -302,11 +439,7 @@ export async function renderDevices() {
                 <td>${batteryChip(device.batteryLevel)}</td>
                 <td style="font-size:0.85rem">${device.lastHeartbeat ? new Date(device.lastHeartbeat).toLocaleTimeString("vi-VN") : "-"}</td>
                 <td>
-                    ${
-                      device.status === "PENDING"
-                        ? `<button class="btn btn-primary btn-sm" onclick="window.openDeviceApproval('${device.id}')">Phê duyệt</button>`
-                        : `<button class="btn-icon action-dots" data-id="${device.id}" title="Thao tác">⋯</button>`
-                    }
+                    <button class="btn-icon action-dots" data-id="${device.id}" title="Thao tác">⋯</button>
                 </td>
             </tr>
         `
@@ -381,7 +514,7 @@ function globalClickHandler(e) {
 function populateZoneSelect(selectedZoneId = "") {
   const select = document.getElementById("dev-zone");
   if (!select) return;
-  const zoneOpts = getZoneOptions(filterGreenhouseId);
+  const zoneOpts = getZoneOptions(filterGreenhouseId, zones);
   select.innerHTML = `<option value="">-- Không --</option>`;
   zoneOpts.forEach((z) => {
     const option = document.createElement("option");
@@ -398,27 +531,11 @@ function populateZoneSelect(selectedZoneId = "") {
   }
 }
 
-export async function openDeviceApproval(id) {
-  const device = devices.find((d) => String(d.id) === String(id));
-  if (!device) return;
-  pendingDeviceId = id;
-  document.getElementById("dev-name").value = device.name;
-  document.getElementById("dev-type").value = device.device_type;
-  document.getElementById("dev-metric").value = device.metric_type;
-  document.getElementById("dev-gateway").value = device.gateway_id;
-  populateZoneSelect(device.zone_id);
-  document.getElementById("dev-mac").value = device.macAddress;
-  document.getElementById("device-modal-title").innerText = "Phê duyệt thiết bị";
-  window._addingNew = false;
-  window._editingDeviceId = null;
-  attachMacFormatEvents();
-  openModal("device-modal");
-}
-
 export function showAddDeviceModal() {
   document.getElementById("dev-name").value = "";
   document.getElementById("dev-type").value = "SENSOR";
-  document.getElementById("dev-metric").value = "Temperature";
+  document.getElementById("dev-type").disabled = false;
+  populateMetricSelect("SENSOR", "Temperature");
   document.getElementById("dev-gateway").value = gateways[0]?.id || "";
   populateZoneSelect();
   document.getElementById("dev-mac").value = "";
@@ -435,7 +552,8 @@ export async function editDevice(id) {
   if (!device) return;
   document.getElementById("dev-name").value = device.name;
   document.getElementById("dev-type").value = device.device_type;
-  document.getElementById("dev-metric").value = device.metric_type;
+  document.getElementById("dev-type").disabled = true;
+  populateMetricSelect(device.device_type, device.metric_type);
   document.getElementById("dev-gateway").value = device.gateway_id;
   populateZoneSelect(device.zone_id);
   document.getElementById("dev-mac").value = device.macAddress;
@@ -459,13 +577,18 @@ export async function deleteDevice(id) {
   }
 }
 
-export async function approveDevice() {
-  const name = document.getElementById("dev-name").value;
+export async function saveDevice() {
+  const name = document.getElementById("dev-name").value.trim();
   const deviceType = document.getElementById("dev-type").value;
   const metricType = document.getElementById("dev-metric").value;
   const gatewayId = document.getElementById("dev-gateway").value;
   const zoneId = document.getElementById("dev-zone").value;
-  let mac = document.getElementById("dev-mac").value;
+  const mac = document.getElementById("dev-mac").value.trim().toUpperCase();
+
+  if (!name) {
+    showToast("Vui lòng nhập tên thiết bị", "warning");
+    return;
+  }
 
   if (!validateMacInput()) {
     showToast("MAC address không đúng định dạng", "warning");
@@ -482,6 +605,16 @@ export async function approveDevice() {
   }
   if (!zoneId) {
     showToast("Vui lòng chọn khu vực", "warning");
+    return;
+  }
+  const selectedGateway = gateways.find((gateway) => String(gateway.id) === String(gatewayId));
+  const zoneGreenhouseId = getGreenhouseIdByZoneId(zoneId, zones);
+  if (
+    selectedGateway?.greenhouse_id !== null &&
+    selectedGateway?.greenhouse_id !== undefined &&
+    String(selectedGateway.greenhouse_id) !== String(zoneGreenhouseId)
+  ) {
+    showToast("Gateway và khu vực phải thuộc cùng một nhà kính", "warning");
     return;
   }
 
@@ -510,15 +643,6 @@ export async function approveDevice() {
       await loadData();
       showToast("Đã thêm thiết bị mới");
       window._addingNew = false;
-    } else {
-      // Phê duyệt (cập nhật status)
-      const id = pendingDeviceId;
-      await updateDevice(id, { ...deviceData, status: "ONLINE" });
-      const dev = devices.find((d) => String(d.id) === String(id));
-      if (dev) {
-        Object.assign(dev, deviceData, { status: "ONLINE" });
-      }
-      showToast("Thiết bị đã được phê duyệt");
     }
     closeModal("device-modal");
     await renderDevices();
@@ -528,8 +652,7 @@ export async function approveDevice() {
 }
 
 // ===================== EXPOSE GLOBAL =====================
-window.openDeviceApproval = openDeviceApproval;
-window.approveDevice = approveDevice;
+window.saveDevice = saveDevice;
 window.showAddDeviceModal = showAddDeviceModal;
 window.editDevice = editDevice;
 window.deleteDevice = deleteDevice;

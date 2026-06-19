@@ -6,8 +6,17 @@
  */
 
 import { showToast, openModal, closeModal } from "./app.js";
-import { buildZoneTree, generateId, escapeHtml } from "./utils.js";
-import { getZones, getRecipes, createZone, updateZone, deleteZone } from "./api.js";
+import { buildZoneTree, escapeHtml } from "./utils.js";
+import {
+  getZones,
+  getRecipes,
+  getStages,
+  getThresholds,
+  createZone,
+  updateZone,
+  updateZoneCycle,
+  deleteZone
+} from "./api.js";
 
 // ===================== BIẾN TOÀN CỤC =====================
 let zones = [];
@@ -68,7 +77,7 @@ function buildTreeHtml(nodes, keyword = "", level = 0) {
   return filtered
     .map((node) => {
       const hasChildren = node.children && node.children.length > 0;
-      const isExpanded = zoneExpanded[node._key];
+      const isExpanded = keyword ? true : zoneExpanded[node._key];
       const indent = level * 20;
       const isSelected = selectedZone?._key === node._key;
 
@@ -86,7 +95,7 @@ function buildTreeHtml(nodes, keyword = "", level = 0) {
                         : '<span style="width:20px;display:inline-block"></span>'
                     }
                     <span class="zone-icon">${zoneIcon(node.type)}</span>
-                    <span class="zone-name">${node.name}</span>
+                    <span class="zone-name">${escapeHtml(node.name)}</span>
                     ${statusChip(node.status)}
                 </div>
                 ${hasChildren && isExpanded ? `<div style="padding-left:20px">${buildTreeHtml(node.children, keyword, level + 1)}</div>` : ""}
@@ -99,10 +108,20 @@ function buildTreeHtml(nodes, keyword = "", level = 0) {
 // ===================== LẤY DANH SÁCH RECIPE =====================
 let recipesCache = [];
 
-async function getRecipeList() {
-  if (recipesCache.length === 0) {
+async function getRecipeList(forceReload = false) {
+  if (forceReload || recipesCache.length === 0) {
     try {
       recipesCache = await getRecipes();
+      await Promise.all(
+        recipesCache.map(async (recipe) => {
+          recipe.stages = await getStages(recipe.id);
+          await Promise.all(
+            recipe.stages.map(async (stage) => {
+              stage.thresholds = await getThresholds(stage.id);
+            })
+          );
+        })
+      );
     } catch (err) {
       console.error("Lỗi lấy danh sách recipe:", err);
       recipesCache = [];
@@ -121,6 +140,60 @@ function renderZoneTree() {
   treeContainer.innerHTML = html || '<div class="no-result">Không tìm thấy vùng phù hợp</div>';
 }
 
+function getZoneCycle(zone) {
+  const recipe = recipesCache.find((item) => String(item.id) === String(zone.recipe_id));
+  const stages = [...(recipe?.stages || [])].sort((a, b) => a.start_day - b.start_day);
+  if (!recipe || !zone.start_date || stages.length === 0) return null;
+
+  const startDate = new Date(`${zone.start_date}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (Number.isNaN(startDate.getTime())) return null;
+
+  const elapsedDay = Math.floor((today - startDate) / 86400000) + 1;
+  const adjustmentDays = Math.max(0, Number(zone.cycle_adjustment_days) || 0);
+  const currentDay = Math.max(0, elapsedDay - adjustmentDays);
+  const totalDays = Math.max(...stages.map((stage) => Number(stage.end_day) || 0));
+  const progress = totalDays > 0 ? Math.min(100, Math.round((currentDay / totalDays) * 100)) : 0;
+  const currentStage = stages.find(
+    (stage) => currentDay >= stage.start_day && currentDay <= stage.end_day
+  );
+  const expectedEndDate = new Date(startDate);
+  expectedEndDate.setDate(expectedEndDate.getDate() + totalDays + adjustmentDays - 1);
+
+  return {
+    recipe,
+    stages,
+    currentStage,
+    currentDay,
+    totalDays,
+    progress,
+    adjustmentDays,
+    expectedEndDate
+  };
+}
+
+function renderCurrentThresholds(zone, stage) {
+  if (!stage?.thresholds?.length) return '<div class="form-helper">Chưa cấu hình ngưỡng.</div>';
+  const actualValues = { Temperature: zone.temperature, Humidity: zone.humidity };
+  return stage.thresholds
+    .map((threshold) => {
+      const actual = actualValues[threshold.metric_type];
+      const hasActual = actual !== null && actual !== undefined && Number.isFinite(Number(actual));
+      const inRange =
+        hasActual &&
+        Number(actual) >= Number(threshold.min_value) &&
+        Number(actual) <= Number(threshold.max_value);
+      return `<div class="card" style="padding:10px">
+        <strong>${escapeHtml(threshold.metric_type)}</strong>: ${threshold.min_value} - ${threshold.max_value}
+        <span class="chip ${!hasActual ? "chip-default" : inRange ? "chip-success" : "chip-warning"}" style="margin-left:6px">
+          ${!hasActual ? "Chưa có dữ liệu" : `${actual} - ${inRange ? "Đạt" : "Ngoài ngưỡng"}`}
+        </span>
+      </div>`;
+    })
+    .join("");
+}
+
 // ===================== RENDER CHI TIẾT =====================
 function renderZoneDetail() {
   const container = document.getElementById("zone-detail");
@@ -134,7 +207,7 @@ function renderZoneDetail() {
         <div class="detail-header">
             <div class="detail-icon">${zoneIcon(zone.type)}</div>
             <div class="detail-title">
-                <div>${zone.name}</div>
+                <div>${escapeHtml(zone.name)}</div>
                 <div class="detail-type">${zoneTypeName(zone.type)}</div>
             </div>
             <div class="detail-actions">
@@ -146,6 +219,7 @@ function renderZoneDetail() {
 
   if (zone.type === "zone") {
     const currentRecipe = recipesCache.find((r) => String(r.id) === String(zone.recipe_id));
+    const cycle = getZoneCycle(zone);
     html += `
             <div class="grid grid-2 zone-metrics">
                 <div class="metric-card temp">🌡️ Nhiệt độ: <strong>${zone.temperature ?? "--"}°C</strong></div>
@@ -156,6 +230,54 @@ function renderZoneDetail() {
                 <div><strong>Ngày bắt đầu:</strong> ${zone.start_date || "Chưa có"}</div>
             </div>
         `;
+    if (cycle) {
+      const timeline = cycle.stages
+        .map((stage) => {
+          const stageState =
+            cycle.currentDay > stage.end_day
+              ? "stage-completed"
+              : cycle.currentStage?.id === stage.id
+                ? "stage-current"
+                : "stage-pending";
+          const marker =
+            stageState === "stage-completed" ? "✓" : stageState === "stage-current" ? "●" : "○";
+          return `<div class="${stageState} stage-card" style="margin-bottom:8px">
+            <strong>${marker} ${escapeHtml(stage.name)}</strong>
+            <div class="form-helper">Ngày ${stage.start_day} - ${stage.end_day}</div>
+          </div>`;
+        })
+        .join("");
+      html += `
+        <div class="card" style="margin:16px 0;padding:16px">
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px">
+            <div>
+              <div class="subtitle" style="margin:0">Tiến độ chu kỳ</div>
+              <div class="form-helper">
+                ${cycle.currentStage ? `Giai đoạn: ${escapeHtml(cycle.currentStage.name)}` : cycle.currentDay > cycle.totalDays ? "Đã hoàn thành chu kỳ" : "Chưa tới giai đoạn cấu hình"}
+              </div>
+            </div>
+            <button class="btn btn-outline btn-sm adjust-zone-cycle" data-key="${zone._key}">Điều chỉnh chu kỳ</button>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:6px">
+            <span>Ngày ${Math.min(cycle.currentDay, cycle.totalDays)} / ${cycle.totalDays}</span>
+            <strong>${cycle.progress}%</strong>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${cycle.progress}%"></div></div>
+          <div class="form-helper" style="margin-top:8px">
+            Dự kiến hoàn thành: ${cycle.expectedEndDate.toLocaleDateString("vi-VN")}
+            · Điều chỉnh: +${cycle.adjustmentDays} ngày
+            ${zone.adjustment_reason ? `· Lý do: ${escapeHtml(zone.adjustment_reason)}` : ""}
+          </div>
+        </div>
+        <div class="grid grid-2" style="align-items:start">
+          <div><div class="subtitle">Timeline giai đoạn</div>${timeline}</div>
+          <div><div class="subtitle">Ngưỡng giai đoạn hiện tại</div>${renderCurrentThresholds(zone, cycle.currentStage)}</div>
+        </div>
+      `;
+    } else if (currentRecipe) {
+      html +=
+        '<div class="card" style="margin-top:16px">Hãy nhập ngày bắt đầu để theo dõi tiến độ.</div>';
+    }
   }
 
   if (zone.children?.length) {
@@ -164,7 +286,7 @@ function renderZoneDetail() {
     zone.children.forEach((child) => {
       html += `
                 <div class="card child-card">
-                    <div><span class="child-icon">${zoneIcon(child.type)}</span> ${child.name}</div>
+                     <div><span class="child-icon">${zoneIcon(child.type)}</span> ${escapeHtml(child.name)}</div>
                     ${child.devices ? `<div class="child-devices">📟 ${child.devices} thiết bị</div>` : ""}
                     <div class="child-actions">
                         <button class="btn-icon edit-child" data-key="${child._key}" title="Sửa">✏️</button>
@@ -190,6 +312,64 @@ function attachDetailEvents() {
   document.querySelectorAll(".delete-zone, .delete-child").forEach((btn) => {
     btn.removeEventListener("click", handleDeleteClick);
     btn.addEventListener("click", handleDeleteClick);
+  });
+  document.querySelectorAll(".adjust-zone-cycle").forEach((btn) => {
+    btn.addEventListener("click", () => openZoneCycleModal(btn.dataset.key));
+  });
+}
+
+function openZoneCycleModal(key) {
+  const zone = findNodeById(zones, key);
+  if (!zone || zone.type !== "zone") return;
+  const modalHtml = `
+    <div class="modal-overlay" id="zone-cycle-modal">
+      <div class="modal" style="width:480px;max-width:95vw">
+        <div class="modal-title">Điều chỉnh chu kỳ - ${escapeHtml(zone.name)}</div>
+        <div class="form-group">
+          <label class="form-label">Tổng số ngày kéo dài</label>
+          <input class="form-input" id="zone-adjustment-days" type="number" min="0" max="365"
+            value="${Number(zone.cycle_adjustment_days) || 0}">
+          <div class="form-helper">Nhập 0 để xóa điều chỉnh và trở về lịch gốc.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Lý do điều chỉnh</label>
+          <textarea class="form-input" id="zone-adjustment-reason" rows="3">${escapeHtml(zone.adjustment_reason || "")}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-outline" id="cancel-zone-cycle">Hủy</button>
+          <button class="btn btn-primary" id="save-zone-cycle">Lưu điều chỉnh</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML("beforeend", modalHtml);
+  const modal = document.getElementById("zone-cycle-modal");
+  openModal("zone-cycle-modal");
+  document.getElementById("cancel-zone-cycle").addEventListener("click", () => {
+    closeModal("zone-cycle-modal");
+    modal.remove();
+  });
+  document.getElementById("save-zone-cycle").addEventListener("click", async () => {
+    const days = Number(document.getElementById("zone-adjustment-days").value);
+    const reason = document.getElementById("zone-adjustment-reason").value.trim();
+    if (!Number.isInteger(days) || days < 0 || days > 365) {
+      showToast("Số ngày điều chỉnh phải từ 0 đến 365", "warning");
+      return;
+    }
+    if (days > 0 && !reason) {
+      showToast("Vui lòng nhập lý do điều chỉnh", "warning");
+      return;
+    }
+    try {
+      await updateZoneCycle(zone.id, days, reason);
+      await loadZones();
+      selectedZone = findNodeById(zones, key);
+      renderZones();
+      closeModal("zone-cycle-modal");
+      modal.remove();
+      showToast("Đã cập nhật chu kỳ của Zone");
+    } catch (err) {
+      showToast("Lỗi điều chỉnh chu kỳ: " + err.message, "error");
+    }
   });
 }
 
@@ -228,7 +408,7 @@ export async function renderZonesPage() {
 
   try {
     await loadZones();
-    await getRecipeList();
+    await getRecipeList(true);
   } catch (err) {
     container.innerHTML = `<div class="card" style="padding:20px; text-align:center; color:#ef4444;">Lỗi tải dữ liệu: ${err.message}</div>`;
     return;
@@ -321,18 +501,8 @@ async function deleteZoneById(key) {
 
 async function saveZone(zoneData) {
   try {
-    const {
-      id,
-      name,
-      type,
-      parentId,
-      greenhouse_id,
-      recipe_id,
-      start_date,
-      temperature,
-      humidity,
-      status
-    } = zoneData;
+    const { id, name, type, parentId, greenhouse_id, recipe_id, start_date, status } = zoneData;
+    let savedId = id;
     if (id) {
       // Sửa
       await updateZone(id, {
@@ -342,30 +512,31 @@ async function saveZone(zoneData) {
         greenhouse_id,
         recipe_id,
         start_date,
-        temperature,
-        humidity,
         status
       });
       showToast("Đã cập nhật vùng");
     } else {
       // Thêm mới
-      await createZone({
+      const created = await createZone({
         name,
         type,
         parent_id: parentId,
         greenhouse_id,
         recipe_id,
         start_date,
-        temperature: type === "zone" ? temperature : undefined,
-        humidity: type === "zone" ? humidity : undefined,
         status: type === "zone" ? status : undefined
       });
+      savedId = created.id;
       showToast("Đã thêm vùng mới");
     }
     await loadZones();
+    selectedZone = findNodeById(zones, `${type}:${savedId}`);
+    if (selectedZone) zoneExpanded[selectedZone._key] = true;
     await renderZones();
+    return true;
   } catch (err) {
     showToast("Lỗi lưu vùng: " + err.message, "error");
+    return false;
   }
 }
 
@@ -396,38 +567,34 @@ async function openZoneModal(editKey = null) {
   const zone = editKey ? findNodeById(zones, editKey) : null;
   const title = zone ? "Sửa vùng" : "Thêm vùng mới";
 
-  // Lấy danh sách greenhouse từ cây zones
-  const greenhouseOptions = [];
-  function collectGreenhouses(nodes) {
-    for (const node of nodes) {
-      if (node.type === "greenhouse") {
-        greenhouseOptions.push({ id: node.id, name: node.name });
-      }
-      if (node.children) collectGreenhouses(node.children);
-    }
-  }
-  collectGreenhouses(zones);
-
   // Lấy danh sách recipe
   const recipeOptions = await getRecipeList();
 
-  // Lấy danh sách parent
-  const parentOptions = [];
-  function collectParents(nodes, level = 0) {
+  const nodesByType = { farm: [], greenhouse: [], zone: [] };
+  function collectNodes(nodes) {
     for (const node of nodes) {
-      if (node.type !== "rack") {
-        parentOptions.push({
-          id: node._key,
-          entityId: node.id,
-          name: "　".repeat(level) + node.name
-        });
-        if (node.children) collectParents(node.children, level + 1);
-      }
+      if (nodesByType[node.type]) nodesByType[node.type].push(node);
+      if (node.children) collectNodes(node.children);
     }
   }
-  collectParents(zones);
+  collectNodes(zones);
 
   const parentId = zone ? findParentId(zones, zone._key) : null;
+  const getParentOptions = (type) => {
+    const parentType = type === "greenhouse" ? "farm" : type === "zone" ? "greenhouse" : null;
+    return parentType ? nodesByType[parentType] : [];
+  };
+  const renderParentOptions = (type, selectedKey = null) => {
+    const options = getParentOptions(type);
+    const emptyLabel = type === "farm" ? "-- Farm là cấp gốc --" : "-- Chọn vùng cha --";
+    return [
+      `<option value="">${emptyLabel}</option>`,
+      ...options.map(
+        (parent) =>
+          `<option value="${parent._key}" ${parent._key === selectedKey ? "selected" : ""}>${escapeHtml(parent.name)}</option>`
+      )
+    ].join("");
+  };
 
   const modalHtml = `
         <div class="modal-overlay" id="zone-crud-modal">
@@ -447,47 +614,21 @@ async function openZoneModal(editKey = null) {
                 </div>
                 <div class="form-group">
                     <label class="form-label">Vùng cha</label>
-                    <select class="form-select" id="zone-parent">
-                        <option value="">-- Không (gốc) --</option>
-                        ${parentOptions.map((p) => `<option value="${p.id}" ${p.id === parentId ? "selected" : ""}>${p.name}</option>`).join("")}
+                    <select class="form-select" id="zone-parent" ${zone?.type === "farm" ? "disabled" : ""}>
+                        ${renderParentOptions(zone?.type || "farm", parentId)}
                     </select>
                 </div>
                 <div id="zone-extra-fields" style="display: ${zone?.type === "zone" ? "block" : "none"}">
                     <div class="form-group">
-                        <label class="form-label">Thuộc nhà kính</label>
-                        <select class="form-select" id="zone-greenhouse">
-                            <option value="">-- Không --</option>
-                            ${greenhouseOptions.map((gh) => `<option value="${gh.id}" ${zone?.greenhouse_id === gh.id ? "selected" : ""}>${gh.name}</option>`).join("")}
-                        </select>
-                    </div>
-                    <div class="form-group">
                         <label class="form-label">Công thức áp dụng</label>
                         <select class="form-select" id="zone-recipe">
                             <option value="">-- Không --</option>
-                            ${recipeOptions.map((r) => `<option value="${r.id}" ${zone?.recipe_id === r.id ? "selected" : ""}>${r.name}</option>`).join("")}
+                            ${recipeOptions.map((r) => `<option value="${r.id}" ${String(zone?.recipe_id) === String(r.id) ? "selected" : ""}>${escapeHtml(r.name)}</option>`).join("")}
                         </select>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Ngày bắt đầu</label>
                         <input class="form-input" type="date" id="zone-start-date" value="${zone?.start_date || ""}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Nhiệt độ (°C)</label>
-                        <input class="form-input" id="zone-temp" type="number" step="0.1" value="${zone?.temperature || 25}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Độ ẩm (%)</label>
-                        <input class="form-input" id="zone-hum" type="number" value="${zone?.humidity || 70}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Trạng thái</label>
-                        <select class="form-select" id="zone-status">
-                            <option value="optimal" ${zone?.status === "optimal" ? "selected" : ""}>Tối ưu</option>
-                            <option value="normal" ${zone?.status === "normal" ? "selected" : ""}>Bình thường</option>
-                            <option value="warning" ${zone?.status === "warning" ? "selected" : ""}>Cảnh báo</option>
-                            <option value="inactive" ${zone?.status === "inactive" ? "selected" : ""}>Chưa hoạt động</option>
-                            <option value="high" ${zone?.status === "high" ? "selected" : ""}>Cao</option>
-                        </select>
                     </div>
                 </div>
                 <div class="modal-actions">
@@ -502,9 +643,12 @@ async function openZoneModal(editKey = null) {
   openModal("zone-crud-modal");
 
   const typeSelect = document.getElementById("zone-type");
+  const parentSelect = document.getElementById("zone-parent");
   const extraDiv = document.getElementById("zone-extra-fields");
   typeSelect.addEventListener("change", () => {
     extraDiv.style.display = typeSelect.value === "zone" ? "block" : "none";
+    parentSelect.disabled = typeSelect.value === "farm";
+    parentSelect.innerHTML = renderParentOptions(typeSelect.value);
   });
 
   const saveBtn = document.getElementById("save-crud");
@@ -519,6 +663,16 @@ async function openZoneModal(editKey = null) {
       showToast("Vui lòng nhập tên vùng", "warning");
       return;
     }
+    if (type !== "farm" && !parentNode) {
+      showToast(`Vui lòng chọn ${type === "greenhouse" ? "Farm" : "Greenhouse"} cha`, "warning");
+      return;
+    }
+    const expectedParentType =
+      type === "greenhouse" ? "farm" : type === "zone" ? "greenhouse" : null;
+    if (expectedParentType && parentNode.type !== expectedParentType) {
+      showToast("Loại vùng cha không hợp lệ", "warning");
+      return;
+    }
     const zoneData = {
       id: zone?.id || null,
       name,
@@ -526,16 +680,16 @@ async function openZoneModal(editKey = null) {
       parentId
     };
     if (type === "zone") {
-      zoneData.greenhouse_id = document.getElementById("zone-greenhouse").value || null;
+      zoneData.greenhouse_id = parentNode.id;
       zoneData.recipe_id = document.getElementById("zone-recipe").value || null;
       zoneData.start_date = document.getElementById("zone-start-date").value || null;
-      zoneData.temperature = parseFloat(document.getElementById("zone-temp").value);
-      zoneData.humidity = parseInt(document.getElementById("zone-hum").value);
-      zoneData.status = document.getElementById("zone-status").value;
+      zoneData.status = zone?.status || "normal";
     }
-    await saveZone(zoneData);
-    closeModal("zone-crud-modal");
-    modal.remove();
+    const saved = await saveZone(zoneData);
+    if (saved) {
+      closeModal("zone-crud-modal");
+      modal.remove();
+    }
   };
   saveBtn.addEventListener("click", saveHandler);
   cancelBtn.addEventListener("click", () => {

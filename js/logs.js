@@ -10,6 +10,41 @@ import { getLogs } from "./api.js";
 
 // ===================== BIẾN TOÀN CỤC =====================
 let logs = [];
+let logRefreshTimer = null;
+
+const entityTypeMap = {
+  DEVICE: "Thiết bị",
+  ZONE: "Zone",
+  GREENHOUSE: "Nhà kính",
+  FARM: "Trang trại",
+  RECIPE: "Công thức",
+  GROWTH_STAGE: "Giai đoạn",
+  ALERT: "Cảnh báo",
+  USER: "Tài khoản",
+  SIMULATION: "Mô phỏng"
+};
+
+function formatLogTime(timestamp) {
+  if (!timestamp) return "-";
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("vi-VN", { timeZone: "UTC" });
+}
+
+function scheduleLogRefresh() {
+  clearTimeout(logRefreshTimer);
+  logRefreshTimer = setTimeout(async () => {
+    const page = document.getElementById("page-logs");
+    if (!page?.classList.contains("active")) return;
+    try {
+      await loadLogs();
+      renderLogs();
+      scheduleLogRefresh();
+    } catch (err) {
+      console.error("Lỗi tự động cập nhật log:", err);
+    }
+  }, 10000);
+}
 
 // ===================== LOAD DỮ LIỆU =====================
 async function loadLogs() {
@@ -28,16 +63,25 @@ export async function renderLogs() {
   // Kiểm tra các phần tử bộ lọc tồn tại
   const filterAction = document.getElementById("log-filter-action");
   const filterRole = document.getElementById("log-filter-role");
-  if (!filterAction || !filterRole) return;
+  const filterEntity = document.getElementById("log-filter-entity");
+  const searchInput = document.getElementById("log-search");
+  if (!filterAction || !filterRole || !filterEntity || !searchInput) return;
 
   const actionFilter = filterAction.value;
   const roleFilter = filterRole.value;
+  const entityFilter = filterEntity.value;
+  const searchKeyword = searchInput.value.trim().toLocaleLowerCase("vi-VN");
 
   // Lọc logs
   const filteredLogs = logs.filter(
     (log) =>
       (actionFilter === "ALL" || log.triggeredBy === actionFilter) &&
-      (roleFilter === "ALL" || log.userRole === roleFilter)
+      (roleFilter === "ALL" || log.userRole === roleFilter) &&
+      (entityFilter === "ALL" || log.entityType === entityFilter) &&
+      (!searchKeyword ||
+        [log.userName, log.entityName, log.description, log.entityType]
+          .filter((value) => value !== null && value !== undefined)
+          .some((value) => String(value).toLocaleLowerCase("vi-VN").includes(searchKeyword)))
   );
 
   // --- Cập nhật 3 card thống kê ---
@@ -58,7 +102,6 @@ export async function renderLogs() {
     TECHNICIAN: "chip-info",
     OPERATOR: "chip-default"
   };
-
   // --- Render bảng ---
   const tableBody = document.getElementById("log-table");
   if (tableBody) {
@@ -70,14 +113,17 @@ export async function renderLogs() {
       .map(
         (log) => `
             <tr>
-                <td style="font-size:0.82rem">${log.timestamp ? new Date(log.timestamp).toLocaleString("vi-VN") : "-"}</td>
+                <td style="font-size:0.82rem">${formatLogTime(log.timestamp)}</td>
                 <td>
                     <div style="font-weight:500">${escapeHtml(log.userName || "Hệ thống")}</div>
                     <div style="font-size:0.75rem;color:#9ca3af">${escapeHtml(log.userId || "-")}</div>
                 </td>
                 <td><span class="chip ${roleMap[log.userRole] || "chip-default"}">${escapeHtml(log.userRole || "-")}</span></td>
                 <td><span class="chip ${log.triggeredBy === "SYSTEM" ? "chip-info" : "chip-success"}">${log.triggeredBy === "SYSTEM" ? "Hệ thống" : "Người dùng"}</span></td>
-                <td>${escapeHtml(log.deviceName || "-")}</td>
+                <td>
+                    <div style="font-weight:500">${escapeHtml(log.entityName || `${entityTypeMap[log.entityType] || "Đối tượng"} #${log.entityId ?? "-"}`)}</div>
+                    <div style="font-size:0.75rem;color:#9ca3af">${escapeHtml(entityTypeMap[log.entityType] || log.entityType || "-")}</div>
+                </td>
                 <td style="font-size:0.82rem;max-width:360px">${escapeHtml(log.description || "-")}</td>
             </tr>
         `
@@ -88,6 +134,7 @@ export async function renderLogs() {
 
 // ===================== RENDER TOÀN BỘ TRANG =====================
 export async function renderLogsPage() {
+  clearTimeout(logRefreshTimer);
   const container = document.getElementById("page-logs");
   if (!container) return;
 
@@ -129,15 +176,31 @@ export async function renderLogsPage() {
             <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
                 <div>
                     <label class="form-label">Nguồn thao tác</label>
-                    <select class="form-select" id="log-filter-action" onchange="renderLogs()" style="width:180px">
+                    <select class="form-select" id="log-filter-action" style="width:180px">
                         <option value="ALL">Tất cả</option>
                         <option value="USER">Người dùng</option>
                         <option value="SYSTEM">Hệ thống</option>
                     </select>
                 </div>
                 <div>
+                    <label class="form-label">Loại đối tượng</label>
+                    <select class="form-select" id="log-filter-entity" style="width:180px">
+                        <option value="ALL">Tất cả</option>
+                        ${Object.entries(entityTypeMap)
+                          .map(([value, label]) => `<option value="${value}">${label}</option>`)
+                          .join("")}
+                    </select>
+                </div>
+                <div style="flex:1;min-width:220px">
+                    <label class="form-label">Tìm kiếm</label>
+                    <input class="form-input" id="log-search" placeholder="Người dùng, đối tượng, nội dung...">
+                </div>
+                <div style="align-self:end">
+                    <button class="btn btn-outline" id="refresh-logs">Làm mới</button>
+                </div>
+                <div>
                     <label class="form-label">Lọc theo vai trò</label>
-                    <select class="form-select" id="log-filter-role" onchange="renderLogs()" style="width:200px">
+                    <select class="form-select" id="log-filter-role" style="width:200px">
                         <option value="ALL">Tất cả</option>
                         <option value="OWNER">Chủ trang trại</option>
                         <option value="TECHNICIAN">Kỹ thuật viên</option>
@@ -154,7 +217,7 @@ export async function renderLogsPage() {
                             <th>Người dùng</th>
                             <th>Vai trò</th>
                             <th>Nguồn</th>
-                            <th>Thiết bị</th>
+                            <th>Đối tượng</th>
                             <th>Nội dung</th>
                         </tr>
                     </thead>
@@ -170,6 +233,16 @@ export async function renderLogsPage() {
     `;
 
   await renderLogs();
+  document
+    .querySelectorAll("#log-filter-action, #log-filter-role, #log-filter-entity")
+    .forEach((element) => element.addEventListener("change", renderLogs));
+  document.getElementById("log-search").addEventListener("input", renderLogs);
+  document.getElementById("refresh-logs").addEventListener("click", async () => {
+    await loadLogs();
+    renderLogs();
+    scheduleLogRefresh();
+  });
+  scheduleLogRefresh();
 }
 
 // ===================== EXPOSE GLOBAL =====================

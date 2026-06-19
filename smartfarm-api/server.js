@@ -17,6 +17,70 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+function getTokenUserId(req) {
+  const token = req.headers.authorization?.replace(/^Bearer\s+/i, "");
+  const userId = Number(token?.split("-").pop());
+  return Number.isSafeInteger(userId) && userId > 0 && userId <= 2147483647 ? userId : null;
+}
+
+function getActorUserId(req) {
+  return getTokenUserId(req) || 1;
+}
+
+async function requireOwner(req, res, next) {
+  try {
+    const userId = getTokenUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: "Phiên đăng nhập không hợp lệ" });
+    }
+    const pool = await getConnection();
+    const result = await pool
+      .request()
+      .input("id", sql.Int, userId)
+      .query("SELECT user_id, user_name, role, status FROM [User] WHERE user_id = @id");
+    const user = result.recordset[0];
+    if (!user || user.status !== "ACTIVE") {
+      return res.status(401).json({ error: "Tài khoản không hoạt động" });
+    }
+    if (user.role !== "OWNER") {
+      return res.status(403).json({ error: "Chỉ OWNER được quản lý tài khoản" });
+    }
+    req.currentUser = user;
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function writeAuditLog(pool, { userId, action, entityType, entityId, deviceId = null }) {
+  await pool
+    .request()
+    .input("deviceId", sql.Int, deviceId)
+    .input("userId", sql.Int, userId)
+    .input("entityType", sql.NVarChar, entityType)
+    .input("entityId", sql.Int, entityId)
+    .input("action", sql.NVarChar, action.slice(0, 255)).query(`
+      INSERT INTO [Log]
+        (device_id, user_id, entity_type, entity_id, action, triggered_by)
+      VALUES
+        (@deviceId, @userId, @entityType, @entityId, @action, 'USER')
+    `);
+}
+
+async function writeSystemAuditLog(pool, { action, entityType, entityId = null, deviceId = null }) {
+  await pool
+    .request()
+    .input("deviceId", sql.Int, deviceId)
+    .input("entityType", sql.NVarChar, entityType)
+    .input("entityId", sql.Int, entityId)
+    .input("action", sql.NVarChar, action.slice(0, 255)).query(`
+      INSERT INTO [Log]
+        (device_id, user_id, entity_type, entity_id, action, triggered_by)
+      VALUES
+        (@deviceId, NULL, @entityType, @entityId, @action, 'SYSTEM')
+    `);
+}
+
 const simulator = new BackendSimulator({
   getConnection,
   sql,
@@ -36,7 +100,8 @@ app.post("/api/auth/login", async (req, res) => {
       .request()
       .input("username", sql.NVarChar, username)
       .input("password", sql.NVarChar, password).query(`
-                SELECT user_id AS id, user_name AS username, email, phone_number, role, status
+                SELECT user_id AS id, user_name AS username, email, phone_number, role, status,
+                    is_primary_owner AS isPrimaryOwner
                 FROM [User]
                 WHERE (user_name = @username OR email = @username) AND password = @password
             `);
@@ -47,9 +112,72 @@ app.post("/api/auth/login", async (req, res) => {
     if (user.status !== "ACTIVE") {
       return res.status(403).json({ error: "Tài khoản chưa được phê duyệt" });
     }
+    await writeAuditLog(pool, {
+      userId: user.id,
+      action: `Tài khoản "${user.username}" đăng nhập.`,
+      entityType: "USER",
+      entityId: user.id
+    });
     // Tạo token giả (trong thực tế nên dùng JWT)
     const token = "demo-token-" + user.id;
     res.json({ ...user, token });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  try {
+    const userId = getActorUserId(req);
+    const pool = await getConnection();
+    await writeAuditLog(pool, {
+      userId,
+      action: `Tài khoản #${userId} đăng xuất.`,
+      entityType: "USER",
+      entityId: userId
+    });
+    res.json({ message: "Đăng xuất thành công" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/auth/change-password", async (req, res) => {
+  try {
+    const userId = getTokenUserId(req);
+    if (!userId) return res.status(401).json({ error: "Phiên đăng nhập không hợp lệ" });
+    const { oldPassword, newPassword, confirmPassword } = req.body || {};
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ error: "Vui lòng nhập đầy đủ mật khẩu" });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: "Hai mật khẩu mới không trùng nhau" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "Mật khẩu mới phải có ít nhất 6 ký tự" });
+    }
+    if (newPassword === oldPassword) {
+      return res.status(400).json({ error: "Mật khẩu mới phải khác mật khẩu cũ" });
+    }
+    const pool = await getConnection();
+    const result = await pool
+      .request()
+      .input("id", sql.Int, userId)
+      .input("oldPassword", sql.NVarChar, oldPassword)
+      .input("newPassword", sql.NVarChar, newPassword).query(`
+        UPDATE [User] SET password = @newPassword
+        WHERE user_id = @id AND password = @oldPassword AND status = 'ACTIVE'
+      `);
+    if (result.rowsAffected[0] === 0) {
+      return res.status(400).json({ error: "Mật khẩu cũ không đúng" });
+    }
+    await writeAuditLog(pool, {
+      userId,
+      action: "Đổi mật khẩu tài khoản.",
+      entityType: "USER",
+      entityId: userId
+    });
+    res.json({ message: "Đổi mật khẩu thành công" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -59,6 +187,7 @@ app.post("/api/auth/login", async (req, res) => {
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { username, password, email, phone, role } = req.body;
+    const safeRole = role === "TECHNICIAN" ? "TECHNICIAN" : "OPERATOR";
     const pool = await getConnection();
     // Kiểm tra tồn tại
     const check = await pool
@@ -75,11 +204,16 @@ app.post("/api/auth/register", async (req, res) => {
       .input("password", sql.NVarChar, password)
       .input("email", sql.NVarChar, email)
       .input("phone", sql.NVarChar, phone)
-      .input("role", sql.NVarChar, role || "OPERATOR").query(`
+      .input("role", sql.NVarChar, safeRole).query(`
                 INSERT INTO [User] (user_name, password, email, phone_number, role, status)
                 OUTPUT INSERTED.user_id AS id, INSERTED.user_name AS username, INSERTED.email, INSERTED.phone_number, INSERTED.role, INSERTED.status
                 VALUES (@username, @password, @email, @phone, @role, 'PENDING')
             `);
+    await writeSystemAuditLog(pool, {
+      action: `Tài khoản "${username}" đăng ký và đang chờ phê duyệt.`,
+      entityType: "USER",
+      entityId: result.recordset[0].id
+    });
     res.status(201).json(result.recordset[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -98,7 +232,8 @@ app.get("/api/auth/me", async (req, res) => {
       .request()
       .input("id", sql.Int, userId)
       .query(
-        `SELECT user_id AS id, user_name AS username, email, phone_number, role, status FROM [User] WHERE user_id = @id`
+        `SELECT user_id AS id, user_name AS username, email, phone_number, role, status,
+            is_primary_owner AS isPrimaryOwner FROM [User] WHERE user_id = @id`
       );
     if (result.recordset.length === 0) return res.status(404).json({ error: "User not found" });
     res.json(result.recordset[0]);
@@ -112,11 +247,13 @@ app.get("/api/auth/me", async (req, res) => {
 // ======================================================================
 
 // GET /api/users
-app.get("/api/users", async (req, res) => {
+app.get("/api/users", requireOwner, async (req, res) => {
   try {
     const pool = await getConnection();
     const result = await pool.request().query(`
-            SELECT user_id AS id, user_name AS username, email, phone_number, role, status FROM [User]
+            SELECT user_id AS id, user_name AS username, email, phone_number, role, status,
+                is_primary_owner AS isPrimaryOwner
+            FROM [User] WHERE is_primary_owner = 0 AND status <> 'REJECTED'
         `);
     res.json(result.recordset);
   } catch (err) {
@@ -125,16 +262,29 @@ app.get("/api/users", async (req, res) => {
 });
 
 // PUT /api/users/:id/role
-app.put("/api/users/:id/role", async (req, res) => {
+app.put("/api/users/:id/role", requireOwner, async (req, res) => {
   try {
     const { id } = req.params;
     const { role } = req.body;
+    if (!["OWNER", "TECHNICIAN", "OPERATOR"].includes(role)) {
+      return res.status(400).json({ error: "Vai trò không hợp lệ" });
+    }
     const pool = await getConnection();
-    await pool
+    const actorUserId = req.currentUser.user_id;
+    const result = await pool
       .request()
       .input("id", sql.Int, id)
       .input("role", sql.NVarChar, role)
-      .query(`UPDATE [User] SET role = @role WHERE user_id = @id`);
+      .query(`UPDATE [User] SET role = @role WHERE user_id = @id AND is_primary_owner = 0`);
+    if (result.rowsAffected[0] === 0) {
+      return res.status(400).json({ error: "Không thể thay đổi vai trò OWNER chính" });
+    }
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Đổi vai trò tài khoản #${id} thành ${role}.`,
+      entityType: "USER",
+      entityId: Number(id)
+    });
     res.json({ message: "Cập nhật role thành công" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -142,21 +292,55 @@ app.put("/api/users/:id/role", async (req, res) => {
 });
 
 // PUT /api/users/:id/status (phê duyệt / từ chối)
-app.put("/api/users/:id/status", async (req, res) => {
+app.put("/api/users/:id/status", requireOwner, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body; // 'ACTIVE' hoặc 'REJECTED' (xóa)
-    const pool = await getConnection();
-    if (status === "REJECTED") {
-      await pool.request().input("id", sql.Int, id).query(`DELETE FROM [User] WHERE user_id = @id`);
-    } else {
-      await pool
-        .request()
-        .input("id", sql.Int, id)
-        .input("status", sql.NVarChar, status)
-        .query(`UPDATE [User] SET status = @status WHERE user_id = @id`);
+    const { status } = req.body;
+    if (!["ACTIVE", "REJECTED"].includes(status)) {
+      return res.status(400).json({ error: "Trạng thái không hợp lệ" });
     }
+    const pool = await getConnection();
+    const actorUserId = req.currentUser.user_id;
+    const result = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("status", sql.NVarChar, status)
+      .query(`UPDATE [User] SET status = @status WHERE user_id = @id AND is_primary_owner = 0`);
+    if (result.rowsAffected[0] === 0) {
+      return res.status(400).json({ error: "Không thể thay đổi trạng thái OWNER chính" });
+    }
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Cập nhật trạng thái tài khoản #${id} thành ${status}.`,
+      entityType: "USER",
+      entityId: Number(id)
+    });
     res.json({ message: "Cập nhật trạng thái thành công" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/users/:id", requireOwner, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = await getConnection();
+    const result = await pool.request().input("id", sql.Int, id)
+      .query(`UPDATE [User] SET status = 'REJECTED'
+              OUTPUT INSERTED.user_name AS username
+              WHERE user_id = @id AND is_primary_owner = 0`);
+    if (result.recordset.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Không thể xóa OWNER chính hoặc tài khoản không tồn tại" });
+    }
+    await writeAuditLog(pool, {
+      userId: req.currentUser.user_id,
+      action: `Xóa tài khoản "${result.recordset[0].username}" (soft-delete).`,
+      entityType: "USER",
+      entityId: Number(id)
+    });
+    res.json({ message: "Xóa tài khoản thành công" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -225,6 +409,8 @@ app.get("/api/zones", async (req, res) => {
                     CAST(NULL AS DECIMAL(5,2)) AS temperature,
                     CAST(NULL AS INT) AS humidity,
                     CAST(NULL AS NVARCHAR(20)) AS status,
+                    CAST(NULL AS INT) AS cycle_adjustment_days,
+                    CAST(NULL AS NVARCHAR(255)) AS adjustment_reason,
                     0 AS level,
                     CAST(f.farm_id AS NVARCHAR(MAX)) AS path
                 FROM Farm f
@@ -240,6 +426,8 @@ app.get("/api/zones", async (req, res) => {
                     CAST(NULL AS DECIMAL(5,2)) AS temperature,
                     CAST(NULL AS INT) AS humidity,
                     CAST(NULL AS NVARCHAR(20)) AS status,
+                    CAST(NULL AS INT) AS cycle_adjustment_days,
+                    CAST(NULL AS NVARCHAR(255)) AS adjustment_reason,
                     zt.level + 1,
                     zt.path + ':' + CAST(g.greenhouse_id AS NVARCHAR(10))
                 FROM Greenhouse g
@@ -256,6 +444,8 @@ app.get("/api/zones", async (req, res) => {
                     z.temperature,
                     z.humidity,
                     z.status,
+                    z.cycle_adjustment_days,
+                    z.adjustment_reason,
                     zt.level + 1,
                     zt.path + ':' + CAST(z.zone_id AS NVARCHAR(10))
                 FROM Zone z
@@ -263,7 +453,9 @@ app.get("/api/zones", async (req, res) => {
             )
             SELECT zt.id, zt.name, zt.type, zt.parent_id, zt.recipe_id,
                 CONVERT(VARCHAR(10), zt.start_date, 23) AS start_date,
-                zt.temperature, zt.humidity, zt.status, zt.level, zt.path
+                zt.temperature, zt.humidity, zt.status,
+                zt.cycle_adjustment_days, zt.adjustment_reason,
+                zt.level, zt.path
             FROM ZoneTree zt ORDER BY zt.path
         `);
     // Trả về danh sách flat, front-end sẽ parse thành cây
@@ -333,6 +525,7 @@ app.post("/api/devices", async (req, res) => {
     const { name, device_type, metric_type, macAddress, zone_id, gateway_id, batteryLevel } =
       req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
     const result = await pool
       .request()
       .input("name", sql.NVarChar, name)
@@ -342,13 +535,27 @@ app.post("/api/devices", async (req, res) => {
       .input("zone_id", sql.Int, zone_id)
       .input("gateway_id", sql.Int, gateway_id)
       .input("batteryLevel", sql.Int, batteryLevel)
-      .input("status", sql.NVarChar, "PENDING")
+      .input("status", sql.NVarChar, "ONLINE")
       .input("lastHeartbeat", sql.DateTime2, new Date()).query(`
                 INSERT INTO Device (device_name, device_type, metric_type, mac_address, zone_id, gateway_id, battery_level, status, last_heartbeat)
                 OUTPUT INSERTED.device_id AS id
                 VALUES (@name, @device_type, @metric_type, @macAddress, @zone_id, @gateway_id, @batteryLevel, @status, @lastHeartbeat)
             `);
     const newId = result.recordset[0].id;
+    await pool
+      .request()
+      .input("deviceId", sql.Int, newId)
+      .input("userId", sql.Int, actorUserId)
+      .input(
+        "action",
+        sql.NVarChar,
+        `Thêm thiết bị "${name}" (${device_type}, ${metric_type}) vào Zone #${zone_id}.`
+      ).query(`
+        INSERT INTO [Log]
+          (device_id, user_id, entity_type, entity_id, action, triggered_by)
+        VALUES
+          (@deviceId, @userId, 'DEVICE', @deviceId, @action, 'USER')
+      `);
     if (device_type === "OUTPUT_DEVICE") {
       await pool
         .request()
@@ -380,6 +587,8 @@ app.put("/api/devices/:id", async (req, res) => {
       batteryLevel
     } = req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
+    const action = `Cập nhật thiết bị "${name}" (${device_type}, ${metric_type}), Zone #${zone_id}, Gateway #${gateway_id}.`;
     await pool
       .request()
       .input("id", sql.Int, id)
@@ -390,7 +599,9 @@ app.put("/api/devices/:id", async (req, res) => {
       .input("zone_id", sql.Int, zone_id)
       .input("gateway_id", sql.Int, gateway_id)
       .input("status", sql.NVarChar, status || null)
-      .input("batteryLevel", sql.Int, batteryLevel ?? null).query(`
+      .input("batteryLevel", sql.Int, batteryLevel ?? null)
+      .input("userId", sql.Int, actorUserId)
+      .input("action", sql.NVarChar, action.slice(0, 255)).query(`
                 UPDATE Device SET
                     device_name = @name,
                     device_type = @device_type,
@@ -401,6 +612,11 @@ app.put("/api/devices/:id", async (req, res) => {
                     status = COALESCE(@status, status),
                     battery_level = COALESCE(@batteryLevel, battery_level)
                 WHERE device_id = @id
+
+                IF @@ROWCOUNT = 0 THROW 50001, 'Device not found', 1;
+                INSERT INTO [Log]
+                  (device_id, user_id, entity_type, entity_id, action, triggered_by)
+                VALUES (@id, @userId, 'DEVICE', @id, @action, 'USER');
             `);
     res.json({ message: "Cập nhật thiết bị thành công" });
   } catch (err) {
@@ -412,8 +628,16 @@ app.delete("/api/devices/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const pool = await getConnection();
-    await pool.request().input("id", sql.Int, id).query(`
-                DELETE FROM [Log] WHERE device_id = @id;
+    const actorUserId = getActorUserId(req);
+    await pool.request().input("id", sql.Int, id).input("userId", sql.Int, actorUserId).query(`
+                DECLARE @deviceName NVARCHAR(100) =
+                    (SELECT device_name FROM Device WHERE device_id = @id);
+                IF @deviceName IS NULL THROW 50001, 'Device not found', 1;
+
+                INSERT INTO [Log]
+                  (device_id, user_id, entity_type, entity_id, action, triggered_by)
+                VALUES
+                  (@id, @userId, 'DEVICE', @id, N'Xóa thiết bị "' + @deviceName + N'".', 'USER');
                 DELETE FROM SensorData WHERE device_id = @id;
                 DELETE FROM ControlProperties WHERE device_id = @id;
                 DELETE FROM Device WHERE device_id = @id;
@@ -455,6 +679,7 @@ app.put("/api/control-properties/:deviceId", async (req, res) => {
     const { deviceId } = req.params;
     const { mode, isActive, valuePercent, autoResetTime } = req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
     await pool
       .request()
       .input("deviceId", sql.Int, deviceId)
@@ -469,6 +694,13 @@ app.put("/api/control-properties/:deviceId", async (req, res) => {
                     auto_reset_time = @autoResetTime
                 WHERE device_id = @deviceId
             `);
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Điều khiển thiết bị #${deviceId}: mode=${mode}, trạng thái=${isActive ? "bật" : "tắt"}, mức=${valuePercent}%.`,
+      entityType: "DEVICE",
+      entityId: Number(deviceId),
+      deviceId: Number(deviceId)
+    });
     res.json({ message: "Cập nhật control property thành công" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -505,6 +737,7 @@ app.get("/api/recipes", async (req, res) => {
                 recipe_name AS name,
                 flower_type,
                 creator AS creator_id,
+                (SELECT user_name FROM [User] WHERE user_id = Recipe.creator) AS creator_name,
                 description,
                 status,
                 CONVERT(VARCHAR(10), created_date, 23) AS created_date
@@ -526,6 +759,7 @@ app.get("/api/recipes/:id", async (req, res) => {
                     recipe_name AS name,
                     flower_type,
                     creator AS creator_id,
+                    (SELECT user_name FROM [User] WHERE user_id = Recipe.creator) AS creator_name,
                     description,
                     status,
                     CONVERT(VARCHAR(10), created_date, 23) AS created_date
@@ -544,6 +778,7 @@ app.post("/api/recipes", async (req, res) => {
   try {
     const { name, flower_type, creator_id, description, status, created_date } = req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
     const result = await pool
       .request()
       .input("name", sql.NVarChar, name)
@@ -557,6 +792,12 @@ app.post("/api/recipes", async (req, res) => {
                 OUTPUT INSERTED.recipe_id AS id
                 VALUES (@name, @flower_type, @creator_id, @description, @status, @created_date)
             `);
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Thêm công thức "${name}" cho ${flower_type}.`,
+      entityType: "RECIPE",
+      entityId: result.recordset[0].id
+    });
     res.status(201).json({
       id: result.recordset[0].id,
       message: "Thêm công thức thành công"
@@ -571,6 +812,7 @@ app.put("/api/recipes/:id", async (req, res) => {
     const { id } = req.params;
     const { name, flower_type, creator_id, description, status, created_date } = req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
     await pool
       .request()
       .input("id", sql.Int, id)
@@ -589,6 +831,12 @@ app.put("/api/recipes/:id", async (req, res) => {
                     created_date = @created_date
                 WHERE recipe_id = @id
             `);
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Cập nhật công thức "${name}" (trạng thái ${status}).`,
+      entityType: "RECIPE",
+      entityId: Number(id)
+    });
     res.json({ message: "Cập nhật công thức thành công" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -599,6 +847,14 @@ app.delete("/api/recipes/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
+    const recipeResult = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query("SELECT recipe_name FROM Recipe WHERE recipe_id = @id");
+    if (recipeResult.recordset.length === 0) {
+      return res.status(404).json({ error: "Không tìm thấy công thức" });
+    }
     await pool.request().input("id", sql.Int, id).query(`
                 BEGIN TRANSACTION;
                 BEGIN TRY
@@ -613,6 +869,12 @@ app.delete("/api/recipes/:id", async (req, res) => {
                     THROW;
                 END CATCH
             `);
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Xóa công thức "${recipeResult.recordset[0].recipe_name}".`,
+      entityType: "RECIPE",
+      entityId: Number(id)
+    });
     res.json({ message: "Xóa công thức thành công" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -707,6 +969,7 @@ app.put("/api/alerts/:id/status", async (req, res) => {
     const { id } = req.params;
     const { status, acknowledgedBy } = req.body; // 'ACKNOWLEDGED', 'RESOLVED'
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
     await pool
       .request()
       .input("id", sql.Int, id)
@@ -719,6 +982,12 @@ app.put("/api/alerts/:id/status", async (req, res) => {
                     resolved_at = @resolvedAt
                 WHERE alert_id = @id
             `);
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Cập nhật cảnh báo #${id} thành ${status}.`,
+      entityType: "ALERT",
+      entityId: Number(id)
+    });
     res.json({ message: "Cập nhật trạng thái cảnh báo thành công" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -729,10 +998,17 @@ app.delete("/api/alerts/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
     await pool
       .request()
       .input("id", sql.Int, id)
       .query(`DELETE FROM AlertLog WHERE alert_id = @id`);
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Xóa cảnh báo #${id}.`,
+      entityType: "ALERT",
+      entityId: Number(id)
+    });
     res.json({ message: "Xóa cảnh báo thành công" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -753,13 +1029,25 @@ app.get("/api/logs", async (req, res) => {
                 l.user_id AS userId,
                 u.user_name AS userName,
                 u.role AS userRole,
-                d.device_name AS deviceName,
+                l.entity_type AS entityType,
+                l.entity_id AS entityId,
+                CASE l.entity_type
+                  WHEN 'DEVICE' THEN d.device_name
+                  WHEN 'ZONE' THEN (SELECT zone_name FROM Zone WHERE zone_id = l.entity_id)
+                  WHEN 'GREENHOUSE' THEN (SELECT greenhouse_name FROM Greenhouse WHERE greenhouse_id = l.entity_id)
+                  WHEN 'FARM' THEN (SELECT farm_name FROM Farm WHERE farm_id = l.entity_id)
+                  WHEN 'RECIPE' THEN (SELECT recipe_name FROM Recipe WHERE recipe_id = l.entity_id)
+                  WHEN 'GROWTH_STAGE' THEN (SELECT stage_name FROM GrowthStage WHERE stage_id = l.entity_id)
+                  WHEN 'ALERT' THEN CONCAT('Cảnh báo #', l.entity_id)
+                  WHEN 'USER' THEN (SELECT user_name FROM [User] WHERE user_id = l.entity_id)
+                  WHEN 'SIMULATION' THEN 'Backend simulator'
+                END AS entityName,
                 l.action AS description,
                 l.triggered_by AS triggeredBy,
                 l.log_time AS timestamp
             FROM [Log] l
             LEFT JOIN [User] u ON l.user_id = u.user_id
-            JOIN Device d ON l.device_id = d.device_id
+            LEFT JOIN Device d ON l.device_id = d.device_id
             ORDER BY l.log_time DESC
         `);
     res.json(result.recordset);
@@ -812,17 +1100,41 @@ app.get("/api/simulation/status", (req, res) => {
   res.json(simulator.getStatus());
 });
 
-app.post("/api/simulation/start", (req, res) => {
-  res.json(simulator.start(req.body?.intervalMs));
+app.post("/api/simulation/start", async (req, res) => {
+  const result = simulator.start(req.body?.intervalMs);
+  const pool = await getConnection();
+  await writeAuditLog(pool, {
+    userId: getActorUserId(req),
+    action: `Bật mô phỏng backend với chu kỳ ${result.intervalMs} ms.`,
+    entityType: "SIMULATION",
+    entityId: null
+  });
+  res.json(result);
 });
 
-app.post("/api/simulation/stop", (req, res) => {
-  res.json(simulator.stop());
+app.post("/api/simulation/stop", async (req, res) => {
+  const result = simulator.stop();
+  const pool = await getConnection();
+  await writeAuditLog(pool, {
+    userId: getActorUserId(req),
+    action: "Dừng mô phỏng backend.",
+    entityType: "SIMULATION",
+    entityId: null
+  });
+  res.json(result);
 });
 
 app.post("/api/simulation/tick", async (req, res) => {
   try {
-    res.json(await simulator.tick());
+    const result = await simulator.tick();
+    const pool = await getConnection();
+    await writeAuditLog(pool, {
+      userId: getActorUserId(req),
+      action: `Chạy thủ công một lượt mô phỏng (${result.readings || 0} cảm biến).`,
+      entityType: "SIMULATION",
+      entityId: null
+    });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -840,6 +1152,14 @@ app.post("/api/simulation/readings", async (req, res) => {
       timestamp ? new Date(timestamp) : null,
       "MANUAL_TEST"
     );
+    const pool = await getConnection();
+    await writeAuditLog(pool, {
+      userId: getActorUserId(req),
+      action: `Gửi giá trị mô phỏng ${value} cho cảm biến #${deviceId}.`,
+      entityType: "DEVICE",
+      entityId: Number(deviceId),
+      deviceId: Number(deviceId)
+    });
     res.status(201).json(result);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -906,24 +1226,15 @@ app.get("/api/stats/global", async (req, res) => {
 // POST /api/zones - Thêm mới vùng (farm, greenhouse, zone)
 app.post("/api/zones", async (req, res) => {
   try {
-    const {
-      name,
-      type,
-      parent_id,
-      greenhouse_id,
-      recipe_id,
-      start_date,
-      temperature,
-      humidity,
-      status
-    } = req.body;
+    const { name, type, parent_id, greenhouse_id, recipe_id, start_date, status } = req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
 
     let newId = null;
 
     if (type === "farm") {
       // Thêm farm - owner_id tạm lấy từ user đăng nhập (mặc định 1)
-      const ownerId = 1; // TODO: lấy từ token thực tế
+      const ownerId = actorUserId;
       const result = await pool
         .request()
         .input("name", sql.NVarChar, name)
@@ -975,17 +1286,22 @@ app.post("/api/zones", async (req, res) => {
         .input("ghId", sql.Int, ghId)
         .input("recipeId", sql.Int, recipe_id || null)
         .input("startDate", sql.Date, start_date || null)
-        .input("temperature", sql.Decimal(5, 2), temperature || null)
-        .input("humidity", sql.Int, humidity || null)
-        .input("status", sql.NVarChar, status || null).query(`
+        .input("status", sql.NVarChar, status || "normal").query(`
                     INSERT INTO Zone (zone_name, greenhouse_id, recipe_id, start_date, temperature, humidity, status)
                     OUTPUT INSERTED.zone_id AS id
-                    VALUES (@name, @ghId, @recipeId, @startDate, @temperature, @humidity, @status)
+                    VALUES (@name, @ghId, @recipeId, @startDate, NULL, NULL, @status)
                 `);
       newId = result.recordset[0].id;
     } else {
       return res.status(400).json({ error: "Loại vùng không hợp lệ" });
     }
+
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Thêm ${type} "${name}".`,
+      entityType: type.toUpperCase(),
+      entityId: newId
+    });
 
     res.status(201).json({ id: newId, message: "Thêm vùng thành công" });
   } catch (err) {
@@ -998,18 +1314,9 @@ app.post("/api/zones", async (req, res) => {
 app.put("/api/zones/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      name,
-      type,
-      parent_id,
-      greenhouse_id,
-      recipe_id,
-      start_date,
-      temperature,
-      humidity,
-      status
-    } = req.body;
+    const { name, type, parent_id, greenhouse_id, recipe_id, start_date, status } = req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
     if (type === "farm") {
       await pool
         .request()
@@ -1033,20 +1340,61 @@ app.put("/api/zones/:id", async (req, res) => {
         .input("greenhouseId", sql.Int, greenhouse_id || parent_id)
         .input("recipeId", sql.Int, recipe_id || null)
         .input("startDate", sql.Date, start_date || null)
-        .input("temperature", sql.Decimal(5, 2), temperature ?? null)
-        .input("humidity", sql.Int, humidity ?? null)
         .input("status", sql.NVarChar, status || null).query(`
                     UPDATE Zone SET zone_name = @name, greenhouse_id = @greenhouseId,
                         recipe_id = @recipeId, start_date = @startDate,
-                        temperature = @temperature, humidity = @humidity, status = @status
+                        status = COALESCE(@status, status)
                     WHERE zone_id = @id
                 `);
     } else {
       return res.status(400).json({ error: "Loại vùng không hợp lệ" });
     }
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Cập nhật ${type} "${name}".`,
+      entityType: type.toUpperCase(),
+      entityId: Number(id)
+    });
     res.json({ message: "Cập nhật vùng thành công" });
   } catch (err) {
     console.error("PUT /api/zones/:id error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/zones/:id/cycle-adjustment", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const adjustmentDays = Number(req.body?.adjustmentDays);
+    const reason = String(req.body?.reason || "").trim();
+    if (!Number.isInteger(adjustmentDays) || adjustmentDays < 0 || adjustmentDays > 365) {
+      return res.status(400).json({ error: "Số ngày điều chỉnh phải từ 0 đến 365" });
+    }
+    if (adjustmentDays > 0 && !reason) {
+      return res.status(400).json({ error: "Cần nhập lý do điều chỉnh chu kỳ" });
+    }
+    const pool = await getConnection();
+    const result = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("days", sql.Int, adjustmentDays)
+      .input("reason", sql.NVarChar, reason || null).query(`
+        UPDATE Zone
+        SET cycle_adjustment_days = @days, adjustment_reason = @reason
+        OUTPUT INSERTED.zone_name AS name
+        WHERE zone_id = @id
+      `);
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ error: "Không tìm thấy Zone" });
+    }
+    await writeAuditLog(pool, {
+      userId: getActorUserId(req),
+      action: `Điều chỉnh chu kỳ Zone "${result.recordset[0].name}" thêm ${adjustmentDays} ngày${reason ? `: ${reason}` : "."}`,
+      entityType: "ZONE",
+      entityId: Number(id)
+    });
+    res.json({ message: "Điều chỉnh chu kỳ Zone thành công" });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -1060,6 +1408,25 @@ app.delete("/api/zones/:id", async (req, res) => {
       return res.status(400).json({ error: "Loại vùng không hợp lệ" });
     }
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
+    const entityConfig = {
+      farm: { table: "Farm", idColumn: "farm_id", nameColumn: "farm_name" },
+      greenhouse: {
+        table: "Greenhouse",
+        idColumn: "greenhouse_id",
+        nameColumn: "greenhouse_name"
+      },
+      zone: { table: "Zone", idColumn: "zone_id", nameColumn: "zone_name" }
+    }[type];
+    const entityResult = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        `SELECT ${entityConfig.nameColumn} AS name FROM ${entityConfig.table} WHERE ${entityConfig.idColumn} = @id`
+      );
+    if (entityResult.recordset.length === 0) {
+      return res.status(404).json({ error: "Không tìm thấy đối tượng cần xóa" });
+    }
     const zoneFilter =
       type === "zone"
         ? "zone_id = @id"
@@ -1069,7 +1436,6 @@ app.delete("/api/zones/:id", async (req, res) => {
     await pool.request().input("id", sql.Int, id).query(`
             BEGIN TRANSACTION;
             BEGIN TRY
-                DELETE FROM [Log] WHERE device_id IN (SELECT device_id FROM Device WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter}));
                 DELETE FROM SensorData WHERE device_id IN (SELECT device_id FROM Device WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter}));
                 DELETE FROM ControlProperties WHERE device_id IN (SELECT device_id FROM Device WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter}));
                 DELETE FROM Device WHERE zone_id IN (SELECT zone_id FROM Zone WHERE ${zoneFilter});
@@ -1084,6 +1450,12 @@ app.delete("/api/zones/:id", async (req, res) => {
                 THROW;
             END CATCH
         `);
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Xóa ${type} "${entityResult.recordset[0].name}".`,
+      entityType: type.toUpperCase(),
+      entityId: Number(id)
+    });
     res.json({ message: "Xóa cấu trúc vùng thành công" });
   } catch (err) {
     console.error("DELETE /api/zones/:id error:", err);
@@ -1101,6 +1473,7 @@ app.post("/api/recipes/:recipeId/stages", async (req, res) => {
     const { recipeId } = req.params;
     const { name, start_day, end_day, completed, currentDay, thresholds } = req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
 
     // Kiểm tra recipe tồn tại
     const checkRecipe = await pool
@@ -1141,6 +1514,13 @@ app.post("/api/recipes/:recipeId/stages", async (req, res) => {
       }
     }
 
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Thêm giai đoạn "${name}" cho công thức #${recipeId}.`,
+      entityType: "GROWTH_STAGE",
+      entityId: newStageId
+    });
+
     res.status(201).json({ id: newStageId, message: "Thêm stage thành công" });
   } catch (err) {
     console.error("POST /api/recipes/:recipeId/stages error:", err);
@@ -1154,6 +1534,7 @@ app.put("/api/stages/:stageId", async (req, res) => {
     const { stageId } = req.params;
     const { name, start_day, end_day, completed, currentDay, thresholds } = req.body;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
 
     // Kiểm tra stage tồn tại
     const checkStage = await pool
@@ -1203,6 +1584,13 @@ app.put("/api/stages/:stageId", async (req, res) => {
       }
     }
 
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Cập nhật giai đoạn "${name}" (${start_day}-${end_day} ngày).`,
+      entityType: "GROWTH_STAGE",
+      entityId: Number(stageId)
+    });
+
     res.json({ message: "Cập nhật stage thành công" });
   } catch (err) {
     console.error("PUT /api/stages/:stageId error:", err);
@@ -1215,6 +1603,14 @@ app.delete("/api/stages/:stageId", async (req, res) => {
   try {
     const { stageId } = req.params;
     const pool = await getConnection();
+    const actorUserId = getActorUserId(req);
+    const stageResult = await pool
+      .request()
+      .input("stageId", sql.Int, stageId)
+      .query("SELECT stage_name FROM GrowthStage WHERE stage_id = @stageId");
+    if (stageResult.recordset.length === 0) {
+      return res.status(404).json({ error: "Không tìm thấy giai đoạn" });
+    }
 
     // Xóa thresholds trước
     await pool
@@ -1227,6 +1623,13 @@ app.delete("/api/stages/:stageId", async (req, res) => {
       .request()
       .input("stageId", sql.Int, stageId)
       .query("DELETE FROM GrowthStage WHERE stage_id = @stageId");
+
+    await writeAuditLog(pool, {
+      userId: actorUserId,
+      action: `Xóa giai đoạn "${stageResult.recordset[0].stage_name}".`,
+      entityType: "GROWTH_STAGE",
+      entityId: Number(stageId)
+    });
 
     res.json({ message: "Xóa stage thành công" });
   } catch (err) {

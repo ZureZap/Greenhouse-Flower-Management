@@ -5,7 +5,8 @@
 
 import { getCurrentUser } from "../auth.js";
 import { showToast, openModal, closeModal } from "../app.js";
-import { getUsers, updateUserRole, updateUserStatus } from "../api.js";
+import { escapeHtml } from "../utils.js";
+import { getUsers, updateUserRole, updateUserStatus, deleteUser } from "../api.js";
 
 // ===================== BIẾN TOÀN CỤC =====================
 let users = [];
@@ -153,7 +154,7 @@ export async function renderUserApprovalPage() {
     return;
   }
 
-  const activeUsers = users.filter((u) => u.status === "ACTIVE");
+  const activeUsers = users.filter((u) => u.status === "ACTIVE" && !u.isPrimaryOwner);
   activeUsers.sort((a, b) => a.username.localeCompare(b.username));
 
   let html = `
@@ -195,16 +196,16 @@ export async function renderUserApprovalPage() {
         OWNER: "Chủ trang trại"
       };
       html += `<tr>
-                        <td>${user.username}</td>
-                        <td>${user.email}</td>
-                        <td>${user.phone}</td>
+                        <td>${escapeHtml(user.username)}</td>
+                        <td>${escapeHtml(user.email)}</td>
+                        <td>${escapeHtml(user.phone || "-")}</td>
                         <td>
                             <select class="form-select role-select" data-id="${user.id}" style="width:auto; display:inline-block;">
                                 ${roleOptions.map((r) => `<option value="${r}" ${user.role === r ? "selected" : ""}>${roleLabels[r]}</option>`).join("")}
                             </select>
                         </td>
                         <td><span class="chip chip-success">Đã kích hoạt</span></td>
-                        <td><span style="color:#6b7280;">Đã kích hoạt</span></td>
+                        <td><button class="btn btn-error btn-sm delete-user" data-id="${user.id}" data-name="${escapeHtml(user.username)}">Xóa</button></td>
                      </tr>`;
     });
   }
@@ -225,6 +226,22 @@ export async function renderUserApprovalPage() {
         showToast(`Đã cập nhật role cho ${user.username}`, "success");
       } catch (err) {
         showToast("Lỗi cập nhật role: " + err.message, "error");
+      }
+    });
+  });
+
+  document.querySelectorAll(".delete-user").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const userId = button.dataset.id;
+      const userName = button.dataset.name;
+      if (!confirm(`Xóa tài khoản "${userName}"?`)) return;
+      try {
+        await deleteUser(userId);
+        users = users.filter((user) => String(user.id) !== String(userId));
+        showToast(`Đã xóa tài khoản ${userName}`, "info");
+        renderUserApprovalPage();
+      } catch (err) {
+        showToast("Lỗi xóa tài khoản: " + err.message, "error");
       }
     });
   });

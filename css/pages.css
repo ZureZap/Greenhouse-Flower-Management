@@ -18,6 +18,52 @@
   transition: background 0.15s;
 }
 
+/* -------------------- TABLE SORT & FILTER -------------------- */
+.table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.table-sort:hover {
+  color: #2563eb;
+}
+
+.table-sort [data-sort-indicator] {
+  color: #9ca3af;
+  font-size: 0.7rem;
+}
+
+.table-filter-row th {
+  padding-top: 6px;
+  padding-bottom: 10px;
+}
+
+.table-filter-row input {
+  width: 100%;
+  min-width: 82px;
+  padding: 6px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+
+.table-filter-row input:focus {
+  border-color: #3b82f6;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+
 .nav-item:hover {
   background: #f3f4f6;
 }

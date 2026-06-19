@@ -19,11 +19,15 @@ CREATE TABLE [User] (
     email NVARCHAR(100) NOT NULL,
     phone_number NVARCHAR(20),
     role NVARCHAR(30) NOT NULL CHECK (role IN ('OWNER', 'TECHNICIAN', 'OPERATOR')),
+    is_primary_owner BIT NOT NULL DEFAULT 0,
     status NVARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
         CHECK (status IN ('ACTIVE', 'PENDING', 'REJECTED')),
     CONSTRAINT UQ_User_UserName UNIQUE (user_name),
     CONSTRAINT UQ_User_Email UNIQUE (email)
 );
+GO
+
+CREATE UNIQUE INDEX UX_User_PrimaryOwner ON [User](is_primary_owner) WHERE is_primary_owner = 1;
 GO
 
 -- 4. Farm
@@ -69,6 +73,8 @@ CREATE TABLE Zone (
     temperature DECIMAL(5,2) NULL,
     humidity INT NULL,
     status NVARCHAR(20) NULL,
+    cycle_adjustment_days INT NOT NULL DEFAULT 0 CHECK (cycle_adjustment_days >= 0),
+    adjustment_reason NVARCHAR(255) NULL,
     FOREIGN KEY (greenhouse_id) REFERENCES Greenhouse(greenhouse_id),
     FOREIGN KEY (recipe_id) REFERENCES Recipe(recipe_id)
 );
@@ -94,7 +100,7 @@ CREATE TABLE Device (
     metric_type NVARCHAR(50) NOT NULL,
     mac_address NVARCHAR(17) NULL,
     battery_level INT NULL,
-    status NVARCHAR(20) NOT NULL CHECK (status IN ('ONLINE', 'OFFLINE', 'ERROR', 'NEEDS_REPLACEMENT', 'PENDING')) DEFAULT 'PENDING',
+    status NVARCHAR(20) NOT NULL CHECK (status IN ('ONLINE', 'OFFLINE', 'ERROR', 'NEEDS_REPLACEMENT')) DEFAULT 'ONLINE',
     last_heartbeat DATETIME2 NOT NULL DEFAULT GETDATE(),
     CHECK (battery_level IS NULL OR battery_level BETWEEN 0 AND 100),
     FOREIGN KEY (gateway_id) REFERENCES Gateway(gateway_id),
@@ -159,12 +165,16 @@ GO
 -- 14. Log
 CREATE TABLE [Log] (
     log_id INT IDENTITY(1,1) PRIMARY KEY,
-    device_id INT NOT NULL,
+    device_id INT NULL,
     user_id INT NULL,
+    entity_type NVARCHAR(20) NOT NULL DEFAULT 'DEVICE'
+        CHECK (entity_type IN ('DEVICE', 'ZONE', 'GREENHOUSE', 'FARM',
+            'RECIPE', 'GROWTH_STAGE', 'ALERT', 'USER', 'SIMULATION')),
+    entity_id INT NULL,
     action NVARCHAR(255) NOT NULL,
     triggered_by NVARCHAR(10) NOT NULL CHECK (triggered_by IN ('USER', 'SYSTEM')),
     log_time DATETIME2 NOT NULL DEFAULT GETDATE(),
-    FOREIGN KEY (device_id) REFERENCES Device(device_id),
+    FOREIGN KEY (device_id) REFERENCES Device(device_id) ON DELETE SET NULL,
     FOREIGN KEY (user_id) REFERENCES [User](user_id),
     CHECK ((triggered_by = 'SYSTEM' AND user_id IS NULL) OR (triggered_by = 'USER' AND user_id IS NOT NULL))
 );
@@ -197,6 +207,7 @@ INSERT INTO [User] (user_id, user_name, password, email, phone_number, role, sta
 (3, 'operator_a', 'demo123', 'operator@greenhouse.local', '0901000003', 'OPERATOR', 'ACTIVE'),
 (4, 'pending_operator', 'demo123', 'pending@greenhouse.local', '0901000004', 'OPERATOR', 'PENDING');
 SET IDENTITY_INSERT [User] OFF;
+UPDATE [User] SET is_primary_owner = 1 WHERE user_id = 1;
 GO
 
 -- 2. Farm
@@ -258,9 +269,8 @@ INSERT INTO Device (device_id, gateway_id, zone_id, device_name, device_type, me
 (9, 2, 3, N'Cảm biến nhiệt độ Lan B1', 'SENSOR', 'Temperature', '02:00:00:00:00:09', 93, 'ONLINE', DATEADD(SECOND, -12, GETDATE())),
 (10, 2, 3, N'Cảm biến CO2 Lan B1', 'SENSOR', 'CO2', '02:00:00:00:00:0A', 9, 'NEEDS_REPLACEMENT', DATEADD(MINUTE, -3, GETDATE())),
 (11, 2, 3, N'Quạt làm mát Lan B1', 'OUTPUT_DEVICE', 'Cooling', '02:00:00:00:00:0B', NULL, 'ONLINE', DATEADD(SECOND, -14, GETDATE())),
-(12, 3, 4, N'Cảm biến mới chờ duyệt', 'SENSOR', 'Temperature', '02:00:00:00:00:0C', 100, 'PENDING', GETDATE()),
-(13, 3, 4, N'Cảm biến pH thử nghiệm', 'SENSOR', 'PH', '02:00:00:00:00:0D', 72, 'ONLINE', DATEADD(SECOND, -35, GETDATE())),
-(14, 3, 4, N'Cảm biến EC lỗi', 'SENSOR', 'EC', '02:00:00:00:00:0E', 40, 'ERROR', DATEADD(MINUTE, -8, GETDATE()));
+(12, 3, 4, N'Cảm biến nhiệt độ thử nghiệm', 'SENSOR', 'Temperature', '02:00:00:00:00:0C', 100, 'ONLINE', GETDATE()),
+(13, 3, 4, N'Cảm biến pH thử nghiệm', 'SENSOR', 'PH', '02:00:00:00:00:0D', 72, 'ONLINE', DATEADD(SECOND, -35, GETDATE()));
 SET IDENTITY_INSERT Device OFF;
 GO
 
@@ -342,8 +352,7 @@ INSERT INTO AlertLog (alert_id, zone_id, message, severity, status, created_at, 
 (1, 2, N'Nhiệt độ Zone Hồng A2 đạt 30.8°C, vượt ngưỡng tối đa.', 'CRITICAL', 'UNSOLVED', DATEADD(MINUTE, -12, GETDATE()), NULL, NULL, 2),
 (2, 2, N'Độ ẩm đất Zone Hồng A2 chỉ còn 45%.', 'WARNING', 'ACKNOWLEDGED', DATEADD(MINUTE, -25, GETDATE()), NULL, N'operator_a', 1),
 (3, 2, N'Cảm biến ánh sáng Hồng A2 mất heartbeat hơn 10 phút.', 'WARNING', 'UNSOLVED', DATEADD(MINUTE, -10, GETDATE()), NULL, NULL, 1),
-(4, 3, N'Pin cảm biến CO2 Lan B1 còn dưới 10%.', 'SIGNIFICANT', 'UNSOLVED', DATEADD(MINUTE, -5, GETDATE()), NULL, NULL, 0),
-(5, 4, N'Cảm biến EC thử nghiệm báo lỗi.', 'SIGNIFICANT', 'RESOLVED', DATEADD(HOUR, -2, GETDATE()), DATEADD(HOUR, -1, GETDATE()), N'agronomist', 0);
+(4, 3, N'Pin cảm biến CO2 Lan B1 còn dưới 10%.', 'SIGNIFICANT', 'UNSOLVED', DATEADD(MINUTE, -5, GETDATE()), NULL, NULL, 0);
 SET IDENTITY_INSERT AlertLog OFF;
 GO
 

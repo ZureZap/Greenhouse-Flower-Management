@@ -61,9 +61,20 @@ export async function getCurrentUser() {
   return request("/auth/me");
 }
 
+export async function changePassword(oldPassword, newPassword, confirmPassword) {
+  return request("/auth/change-password", {
+    method: "PUT",
+    body: JSON.stringify({ oldPassword, newPassword, confirmPassword })
+  });
+}
+
 export async function logout() {
-  localStorage.removeItem("token");
-  localStorage.removeItem("user");
+  try {
+    await request("/auth/logout", { method: "POST" });
+  } finally {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+  }
 }
 
 // ======================================================================
@@ -86,6 +97,10 @@ export async function updateUserStatus(userId, status) {
     method: "PUT",
     body: JSON.stringify({ status })
   });
+}
+
+export async function deleteUser(userId) {
+  return request(`/users/${userId}`, { method: "DELETE" });
 }
 
 // ======================================================================
@@ -126,6 +141,13 @@ export async function updateZone(id, data) {
 export async function deleteZone(id, type = "zone") {
   return request(`/zones/${id}?type=${encodeURIComponent(type)}`, {
     method: "DELETE"
+  });
+}
+
+export async function updateZoneCycle(id, adjustmentDays, reason) {
+  return request(`/zones/${id}/cycle-adjustment`, {
+    method: "PUT",
+    body: JSON.stringify({ adjustmentDays, reason })
   });
 }
 
@@ -303,16 +325,19 @@ export default {
   login,
   register,
   getCurrentUser,
+  changePassword,
   logout,
   getUsers,
   updateUserRole,
   updateUserStatus,
+  deleteUser,
   getFarms,
   getGreenhouses,
   getZones,
   createZone,
   updateZone,
   deleteZone,
+  updateZoneCycle,
   getDevices,
   getDevice,
   createDevice,

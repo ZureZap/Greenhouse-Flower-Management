@@ -169,11 +169,13 @@ export function generateId() {
  * @returns {string} Chuỗi đã escape
  */
 export function escapeHtml(str) {
-  if (!str) return "";
-  return str.replace(/[&<>]/g, function (m) {
+  if (str === null || str === undefined) return "";
+  return String(str).replace(/[&<>"']/g, function (m) {
     if (m === "&") return "&amp;";
     if (m === "<") return "&lt;";
     if (m === ">") return "&gt;";
+    if (m === '"') return "&quot;";
+    if (m === "'") return "&#39;";
     return m;
   });
 }

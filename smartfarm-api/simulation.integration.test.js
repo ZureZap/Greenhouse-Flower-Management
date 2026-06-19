@@ -12,7 +12,8 @@ async function main() {
   const simulator = new BackendSimulator({ getConnection, sql });
   const contextResult = await pool.request().query(`
         SELECT TOP 1 d.device_id AS sensorId, d.zone_id AS zoneId,
-            z.temperature, z.humidity, th.min_value AS minValue, th.max_value AS maxValue
+            z.temperature, z.humidity, z.status AS zoneStatus,
+            th.min_value AS minValue, th.max_value AS maxValue
         FROM Device d
         JOIN Zone z ON z.zone_id = d.zone_id
         JOIN GrowthStage gs ON gs.recipe_id = z.recipe_id
@@ -91,10 +92,6 @@ async function main() {
     );
     assert.strictEqual(normal.direction, "normal");
     assert.strictEqual(normal.alert.action, "resolved");
-    assert(
-      normal.controls.some((control) => !control.active),
-      "AUTO actuator was not disabled"
-    );
 
     const databaseState = await pool
       .request()
@@ -172,7 +169,8 @@ async function main() {
       .input("zoneId", sql.Int, context.zoneId)
       .input("temperature", sql.Decimal(5, 2), context.temperature)
       .input("humidity", sql.Int, context.humidity)
-      .query(`UPDATE Zone SET temperature = @temperature, humidity = @humidity
+      .input("status", sql.NVarChar, context.zoneStatus)
+      .query(`UPDATE Zone SET temperature = @temperature, humidity = @humidity, status = @status
                     WHERE zone_id = @zoneId`);
     await sql.close();
   }

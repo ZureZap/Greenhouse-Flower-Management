@@ -29,8 +29,8 @@ export async function register(userData) {
 }
 
 // Đăng xuất
-export function logout() {
-  apiLogout();
+export async function logout() {
+  await apiLogout();
 }
 
 // ===================== SESSION READERS =====================

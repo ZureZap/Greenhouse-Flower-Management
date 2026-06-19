@@ -16,16 +16,16 @@ let devices = [];
 let alerts = [];
 let zones = [];
 let sensorData = [];
+let dashboardRefreshTimer = null;
 
-/**
- * Tạo nhãn thời gian cho 24 giờ (dựa trên giờ hiện tại, quay ngược 23 giờ)
- */
-function generateTimeLabels() {
-  const now = new Date();
-  return Array.from({ length: 24 }, (_, i) => {
-    const hour = (now.getHours() - 23 + i + 24) % 24;
-    return `${hour}:00`;
-  });
+function scheduleDashboardRefresh() {
+  clearTimeout(dashboardRefreshTimer);
+  dashboardRefreshTimer = setTimeout(() => {
+    const dashboardPage = document.getElementById("page-dashboard");
+    if (dashboardPage?.classList.contains("active")) {
+      renderDashboardPage();
+    }
+  }, 10000);
 }
 
 // ===================== LẤY DỮ LIỆU =====================
@@ -106,19 +106,21 @@ function getStatsForGreenhouse(greenhouseId) {
   const zonesWithRecipe = zoneList.filter((z) => z.recipe_id);
 
   // Nhiệt độ / độ ẩm trung bình
-  let avgTemp = 0,
-    avgHum = 0;
-  const zonesWithTemp = zoneList.filter(
-    (z) =>
-      z.temperature !== undefined &&
-      z.temperature !== null &&
-      z.humidity !== undefined &&
-      z.humidity !== null
-  );
-  if (zonesWithTemp.length > 0) {
-    avgTemp =
-      zonesWithTemp.reduce((sum, z) => sum + Number(z.temperature), 0) / zonesWithTemp.length;
-    avgHum = zonesWithTemp.reduce((sum, z) => sum + Number(z.humidity), 0) / zonesWithTemp.length;
+  let avgTemp = null,
+    avgHum = null;
+  const temperatures = zoneList
+    .filter((zone) => zone.temperature !== null && zone.temperature !== undefined)
+    .map((zone) => Number(zone.temperature))
+    .filter(Number.isFinite);
+  const humidities = zoneList
+    .filter((zone) => zone.humidity !== null && zone.humidity !== undefined)
+    .map((zone) => Number(zone.humidity))
+    .filter(Number.isFinite);
+  if (temperatures.length > 0) {
+    avgTemp = temperatures.reduce((sum, value) => sum + value, 0) / temperatures.length;
+  }
+  if (humidities.length > 0) {
+    avgHum = humidities.reduce((sum, value) => sum + value, 0) / humidities.length;
   }
 
   return {
@@ -145,11 +147,14 @@ function getChartData(greenhouseId) {
   for (const row of rows) {
     const timestamp = new Date(row.timestamp).getTime();
     if (!Number.isFinite(timestamp)) continue;
+    if (row.value === null || row.value === undefined || row.value === "") continue;
     const bucketTime = Math.floor(timestamp / bucketSizeMs) * bucketSizeMs;
     if (!buckets.has(bucketTime)) buckets.set(bucketTime, new Map());
     const metrics = buckets.get(bucketTime);
+    const value = Number(row.value);
+    if (!Number.isFinite(value)) continue;
     if (!metrics.has(row.metricType)) metrics.set(row.metricType, []);
-    metrics.get(row.metricType).push(Number(row.value));
+    metrics.get(row.metricType).push(value);
   }
 
   const timestamps = [...buckets.keys()].sort((a, b) => a - b);
@@ -157,7 +162,8 @@ function getChartData(greenhouseId) {
     new Date(ts).toLocaleTimeString("vi-VN", {
       hour: "2-digit",
       minute: "2-digit",
-      second: "2-digit"
+      second: "2-digit",
+      timeZone: "UTC"
     })
   );
   const series = (metric) =>
@@ -236,7 +242,12 @@ function initCharts(data, stats) {
   if (radarCtx) {
     const avgTemp = stats.avgTemp;
     const avgHum = stats.avgHum;
-    const norm = (val, min, max) => Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
+    const norm = (val, min, max) => {
+      if (val === null || val === undefined || val === "") return null;
+      const numericValue = Number(val);
+      if (!Number.isFinite(numericValue)) return null;
+      return Math.max(0, Math.min(100, ((numericValue - min) / (max - min)) * 100));
+    };
     const tempScore = norm(avgTemp, 15, 35);
     const humScore = norm(avgHum, 40, 90);
     const latest = (metric) =>
@@ -246,9 +257,9 @@ function initCharts(data, stats) {
           (row) =>
             String(row.greenhouseId) === String(currentGreenhouseId) && row.metricType === metric
         )?.value;
-    const lightScore = norm(Number(latest("Light") || 0), 0, 1000);
-    const co2Score = norm(Number(latest("CO2") || 0), 300, 1200);
-    const phScore = norm(Number(latest("PH") || 0), 4, 9);
+    const lightScore = norm(latest("Light"), 0, 1000);
+    const co2Score = norm(latest("CO2"), 300, 1200);
+    const phScore = norm(latest("PH"), 4, 9);
 
     radarChart = new Chart(radarCtx, {
       type: "radar",
@@ -327,6 +338,7 @@ function initCharts(data, stats) {
 
 // ===================== RENDER =====================
 export async function renderDashboardPage() {
+  clearTimeout(dashboardRefreshTimer);
   const container = document.getElementById("page-dashboard");
   if (!container) return;
 
@@ -353,6 +365,14 @@ export async function renderDashboardPage() {
 
   const stats = getStatsForGreenhouse(currentGreenhouseId);
   const chartData = getChartData(currentGreenhouseId);
+  const formatMetric = (value, suffix) =>
+    Number.isFinite(value) ? `${value.toFixed(1)}${suffix}` : "--";
+  const metricStatus = (value, low, high) => {
+    if (!Number.isFinite(value)) return "Chưa có dữ liệu";
+    if (value > high) return "Cao";
+    if (value < low) return "Thấp";
+    return "Bình thường";
+  };
 
   // Xây dựng giao diện
   container.innerHTML = `
@@ -360,6 +380,7 @@ export async function renderDashboardPage() {
             <div>
                 <div class="page-title">Dashboard Tổng quan</div>
                 <div class="page-sub">Giám sát thời gian thực các chỉ số môi trường nhà kính</div>
+                <div class="page-sub">Tự động cập nhật mỗi 10 giây</div>
             </div>
             <div style="position: absolute; top: 0; right: 0;">
                 <label style="font-size:0.85rem; color:#6b7280; margin-right:8px;">🏠 Nhà kính:</label>
@@ -374,14 +395,14 @@ export async function renderDashboardPage() {
             <div class="card">
                 <div class="stat-icon" style="background:#fef3c7;color:#f59e0b">🌡️</div>
                 <div class="stat-label">Nhiệt độ TB</div>
-                <div class="stat-value">${stats.avgTemp.toFixed(1)}°C</div>
-                <span class="chip chip-default" style="margin-top:6px">${stats.avgTemp > 28 ? "Cao" : stats.avgTemp < 18 ? "Thấp" : "Bình thường"}</span>
+                <div class="stat-value">${formatMetric(stats.avgTemp, "°C")}</div>
+                <span class="chip chip-default" style="margin-top:6px">${metricStatus(stats.avgTemp, 18, 28)}</span>
             </div>
             <div class="card">
                 <div class="stat-icon" style="background:#dbeafe;color:#3b82f6">💧</div>
                 <div class="stat-label">Độ ẩm TB</div>
-                <div class="stat-value">${stats.avgHum.toFixed(1)}%</div>
-                <span class="chip chip-default" style="margin-top:6px">${stats.avgHum > 80 ? "Cao" : stats.avgHum < 60 ? "Thấp" : "Bình thường"}</span>
+                <div class="stat-value">${formatMetric(stats.avgHum, "%")}</div>
+                <span class="chip chip-default" style="margin-top:6px">${metricStatus(stats.avgHum, 60, 80)}</span>
             </div>
             <div class="card">
                 <div class="stat-icon" style="background:#dbeafe;color:#3b82f6">🔌</div>
@@ -416,7 +437,7 @@ export async function renderDashboardPage() {
         <!-- Biểu đồ -->
         <div class="grid grid-8-4" style="margin-bottom:20px">
             <div class="card">
-                <div class="card-title">Biến động 24 giờ qua</div>
+                <div class="card-title">Dữ liệu cảm biến gần đây</div>
                 <div class="chart-container" style="height:300px"><canvas id="areaChart"></canvas></div>
             </div>
             <div class="card">
@@ -433,17 +454,16 @@ export async function renderDashboardPage() {
   destroyCharts();
   initCharts(chartData, stats);
 
-  // Sự kiện đổi greenhouse
+  // Sự kiện đổi greenhouse. Phần tử select vừa được tạo lại cùng container,
+  // nên không có listener cũ cần loại bỏ.
   const select = document.getElementById("greenhouse-select");
-  // Xóa event cũ để tránh duplicate
-  select.replaceWith(select.cloneNode(true));
-  const newSelect = document.getElementById("greenhouse-select");
-  newSelect.addEventListener("change", (e) => {
+  select.addEventListener("change", (e) => {
     const newId = e.target.value;
     currentGreenhouseId = String(newId);
     localStorage.setItem("selectedGreenhouse", newId);
     renderDashboardPage();
   });
+  scheduleDashboardRefresh();
 }
 
 // Export các hàm cần thiết
