@@ -68,6 +68,13 @@ export async function changePassword(oldPassword, newPassword, confirmPassword) 
   });
 }
 
+export async function forgotPassword(identifier, phone, newPassword, confirmPassword) {
+  return request("/auth/forgot-password", {
+    method: "PUT",
+    body: JSON.stringify({ identifier, phone, newPassword, confirmPassword })
+  });
+}
+
 export async function logout() {
   try {
     await request("/auth/logout", { method: "POST" });
@@ -326,6 +333,7 @@ export default {
   register,
   getCurrentUser,
   changePassword,
+  forgotPassword,
   logout,
   getUsers,
   updateUserRole,

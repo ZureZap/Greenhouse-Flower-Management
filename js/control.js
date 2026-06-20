@@ -6,6 +6,7 @@
  */
 
 import { showToast } from "./app.js";
+import { getCurrentUser } from "./auth.js";
 import { getDevices, getControlProperties, updateControlProperty, getZones } from "./api.js";
 import {
   buildZoneTree,
@@ -77,6 +78,7 @@ export async function renderControls() {
     .map((device) => {
       const control = device.control;
       const isManual = control.mode === "MANUAL";
+      const technicianAutoOnly = getCurrentUser()?.role === "TECHNICIAN";
       const isActive = control.isActive;
       const zoneName = getZoneName(device.zone_id, zones) || "N/A";
 
@@ -94,12 +96,12 @@ export async function renderControls() {
                 </div>
                 <span class="chip ${control.mode === "AUTO" ? "chip-success" : "chip-warning"}">${control.mode}</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-                <div class="toggle-track ${isManual ? "checked" : ""}" 
-                     onclick="window.toggleControlMode('${device.id}')"></div>
-                <span style="font-size:0.875rem">
-                    ${control.mode === "AUTO" ? "Chuyển sang thủ công" : "Đang ở chế độ thủ công"}
-                </span>
+            <div style="display:grid;grid-template-columns:${technicianAutoOnly ? "1fr" : "1fr 1fr"};gap:8px;margin-bottom:12px">
+                <button class="btn ${!isManual ? "btn-success" : "btn-outline"}"
+                    onclick="window.setControlMode('${device.id}', 'AUTO')">⚡ Tự động</button>
+                ${technicianAutoOnly ? "" : `<button class="btn ${isManual ? "btn-warning" : "btn-outline"}"
+                    onclick="window.setControlMode('${device.id}', 'MANUAL')">✍️ Thủ công</button>
+                `}
             </div>
             ${
               isManual && control.autoResetTime
@@ -120,11 +122,11 @@ export async function renderControls() {
                     Công suất: ${control.valuePercent}%
                 </div>
                 <input type="range" class="slider" value="${control.valuePercent}" 
-                       ${control.mode === "AUTO" ? "disabled" : ""} 
+                       ${control.mode === "AUTO" || technicianAutoOnly ? "disabled" : ""} 
                        onchange="window.setControlValue('${device.id}', this.value)">
             </div>
             <button class="btn ${isActive ? "btn-error" : "btn-success"}" 
-                    style="width:100%" onclick="window.toggleDevice('${device.id}')">
+                    style="width:100%" ${isManual && !technicianAutoOnly ? "" : "disabled"} onclick="window.toggleDevice('${device.id}')">
                 ${isActive ? "🔴 Tắt thiết bị" : "🟢 Bật thiết bị"}
             </button>
         </div>
@@ -233,6 +235,16 @@ export async function toggleControlMode(deviceId) {
   }
 }
 
+export async function setControlMode(deviceId, newMode) {
+  if (getCurrentUser()?.role === "TECHNICIAN" && newMode !== "AUTO") {
+    showToast("Kỹ thuật viên chỉ được sử dụng chế độ tự động", "warning");
+    return;
+  }
+  const control = controlProperties.find((cp) => String(cp.device_id) === String(deviceId));
+  if (!control || control.mode === newMode) return;
+  await toggleControlMode(deviceId);
+}
+
 export async function toggleDevice(deviceId) {
   const device = devices.find((d) => String(d.id) === String(deviceId));
   if (!device) return;
@@ -263,6 +275,10 @@ export async function toggleDevice(deviceId) {
 export async function setControlValue(deviceId, value) {
   const control = controlProperties.find((cp) => String(cp.device_id) === String(deviceId));
   if (!control) return;
+  if (control.mode !== "MANUAL") {
+    showToast("Chỉ được chỉnh công suất ở chế độ thủ công", "warning");
+    return;
+  }
 
   const newVal = parseInt(value, 10);
   try {
@@ -301,6 +317,7 @@ export async function resetToAuto(deviceId) {
 
 // Expose global
 window.toggleControlMode = toggleControlMode;
+window.setControlMode = setControlMode;
 window.toggleDevice = toggleDevice;
 window.setControlValue = setControlValue;
 window.resetToAuto = resetToAuto;

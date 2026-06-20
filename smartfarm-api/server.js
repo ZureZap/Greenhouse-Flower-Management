@@ -183,6 +183,50 @@ app.put("/api/auth/change-password", async (req, res) => {
   }
 });
 
+app.put("/api/auth/forgot-password", async (req, res) => {
+  try {
+    const { identifier, phone, newPassword, confirmPassword } = req.body || {};
+    if (!identifier || !phone || !newPassword || !confirmPassword) {
+      return res.status(400).json({ error: "Vui lòng nhập đầy đủ thông tin" });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: "Hai mật khẩu mới không trùng nhau" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: "Mật khẩu mới phải có ít nhất 6 ký tự" });
+    }
+    const pool = await getConnection();
+    const account = await pool
+      .request()
+      .input("identifier", sql.NVarChar, identifier.trim())
+      .input("phone", sql.NVarChar, phone.trim()).query(`
+        SELECT user_id AS id, password
+        FROM [User]
+        WHERE (user_name = @identifier OR email = @identifier)
+          AND phone_number = @phone AND status = 'ACTIVE'
+      `);
+    if (account.recordset.length === 0) {
+      return res.status(400).json({ error: "Thông tin tài khoản hoặc số điện thoại không đúng" });
+    }
+    if (account.recordset[0].password === newPassword) {
+      return res.status(400).json({ error: "Mật khẩu mới phải khác mật khẩu hiện tại" });
+    }
+    const userId = account.recordset[0].id;
+    await pool.request().input("id", sql.Int, userId)
+      .input("newPassword", sql.NVarChar, newPassword)
+      .query("UPDATE [User] SET password = @newPassword WHERE user_id = @id");
+    await writeAuditLog(pool, {
+      userId,
+      action: "Đặt lại mật khẩu bằng chức năng quên mật khẩu.",
+      entityType: "USER",
+      entityId: userId
+    });
+    res.json({ message: "Đặt lại mật khẩu thành công" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/auth/register
 app.post("/api/auth/register", async (req, res) => {
   try {
@@ -349,6 +393,36 @@ app.delete("/api/users/:id", requireOwner, async (req, res) => {
 // ======================================================================
 // 3. API FARMS & GREENHOUSES
 // ======================================================================
+
+app.use("/api", async (req, res, next) => {
+  try {
+    const userId = getTokenUserId(req);
+    if (!userId) return res.status(401).json({ error: "Phiên đăng nhập không hợp lệ" });
+    const pool = await getConnection();
+    const result = await pool.request().input("id", sql.Int, userId)
+      .query("SELECT role FROM [User] WHERE user_id = @id AND status = 'ACTIVE'");
+    const role = result.recordset[0]?.role;
+    if (!role) return res.status(401).json({ error: "Tài khoản không hoạt động" });
+    if (role === "OWNER") return next();
+
+    const path = req.path;
+    const commonRead = ["/devices", "/zones", "/alerts", "/sensor-data", "/stats", "/control-properties"];
+    const technicianRead = ["/recipes", "/stages", "/gateways", "/farms", "/greenhouses", "/simulation"];
+    const isAllowedRead = req.method === "GET" && (
+      commonRead.some((prefix) => path.startsWith(prefix)) ||
+      (role === "TECHNICIAN" && technicianRead.some((prefix) => path.startsWith(prefix)))
+    );
+    const isTechnicianWrite = role === "TECHNICIAN" && (
+      path.startsWith("/devices") || path.startsWith("/recipes") || path.startsWith("/stages") ||
+      path.startsWith("/simulation") || /^\/zones\/\d+\/cycle-adjustment$/.test(path)
+    );
+    const isControlWrite = path.startsWith("/control-properties") && ["PUT", "POST"].includes(req.method);
+    if (isAllowedRead || isTechnicianWrite || isControlWrite) return next();
+    return res.status(403).json({ error: "Bạn không có quyền thực hiện chức năng này" });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 app.get("/api/farms", async (req, res) => {
   try {
@@ -525,7 +599,8 @@ app.post("/api/devices", async (req, res) => {
     const { name, device_type, metric_type, macAddress, zone_id, gateway_id, batteryLevel } =
       req.body;
     const pool = await getConnection();
-    const actorUserId = getActorUserId(req);
+    const actorUserId = getTokenUserId(req);
+    if (!actorUserId) return res.status(401).json({ error: "Phiên đăng nhập không hợp lệ" });
     const result = await pool
       .request()
       .input("name", sql.NVarChar, name)
@@ -678,15 +753,48 @@ app.put("/api/control-properties/:deviceId", async (req, res) => {
   try {
     const { deviceId } = req.params;
     const { mode, isActive, valuePercent, autoResetTime } = req.body;
+    if (!["AUTO", "MANUAL"].includes(mode)) {
+      return res.status(400).json({ error: "Chế độ chỉ có thể là AUTO hoặc MANUAL" });
+    }
+    const parsedValue = Number(valuePercent);
+    if (typeof isActive !== "boolean" || !Number.isInteger(parsedValue) || parsedValue < 0 || parsedValue > 100) {
+      return res.status(400).json({ error: "Trạng thái hoặc công suất không hợp lệ" });
+    }
     const pool = await getConnection();
-    const actorUserId = getActorUserId(req);
-    await pool
+    const actorUserId = getTokenUserId(req);
+    if (!actorUserId) return res.status(401).json({ error: "Phiên đăng nhập không hợp lệ" });
+    const actorResult = await pool.request().input("actorUserId", sql.Int, actorUserId)
+      .query("SELECT role FROM [User] WHERE user_id = @actorUserId AND status = 'ACTIVE'");
+    if (actorResult.recordset.length === 0) {
+      return res.status(401).json({ error: "Tài khoản không hợp lệ" });
+    }
+    const actorRole = actorResult.recordset[0].role;
+    if (!['OWNER', 'TECHNICIAN', 'OPERATOR'].includes(actorRole)) {
+      return res.status(403).json({ error: "Bạn không có quyền điều khiển thiết bị" });
+    }
+    if (actorRole === "TECHNICIAN" && mode !== "AUTO") {
+      return res.status(403).json({ error: "Kỹ thuật viên chỉ được sử dụng chế độ AUTO" });
+    }
+    const currentResult = await pool.request().input("deviceId", sql.Int, deviceId).query(`
+      SELECT cp.mode, cp.is_active AS isActive, cp.value_percent AS valuePercent
+      FROM ControlProperties cp JOIN Device d ON d.device_id = cp.device_id
+      WHERE cp.device_id = @deviceId AND d.device_type = 'OUTPUT_DEVICE'
+    `);
+    if (currentResult.recordset.length === 0) {
+      return res.status(404).json({ error: "Không tìm thấy thiết bị đầu ra" });
+    }
+    const current = currentResult.recordset[0];
+    if (current.mode === "AUTO" && mode === "AUTO" &&
+        (Boolean(current.isActive) !== isActive || Number(current.valuePercent) !== parsedValue)) {
+      return res.status(409).json({ error: "Không thể điều khiển thủ công khi thiết bị đang ở chế độ AUTO" });
+    }
+    const result = await pool
       .request()
       .input("deviceId", sql.Int, deviceId)
       .input("mode", sql.NVarChar, mode)
       .input("isActive", sql.Bit, isActive)
-      .input("valuePercent", sql.Int, valuePercent)
-      .input("autoResetTime", sql.DateTime2, autoResetTime).query(`
+      .input("valuePercent", sql.Int, parsedValue)
+      .input("autoResetTime", sql.DateTime2, mode === "MANUAL" ? autoResetTime : null).query(`
                 UPDATE ControlProperties SET
                     mode = @mode,
                     is_active = @isActive,
@@ -694,9 +802,12 @@ app.put("/api/control-properties/:deviceId", async (req, res) => {
                     auto_reset_time = @autoResetTime
                 WHERE device_id = @deviceId
             `);
+    if (result.rowsAffected[0] === 0) {
+      return res.status(404).json({ error: "Không tìm thấy cấu hình điều khiển" });
+    }
     await writeAuditLog(pool, {
       userId: actorUserId,
-      action: `Điều khiển thiết bị #${deviceId}: mode=${mode}, trạng thái=${isActive ? "bật" : "tắt"}, mức=${valuePercent}%.`,
+      action: `Điều khiển thiết bị #${deviceId}: mode=${mode}, trạng thái=${isActive ? "bật" : "tắt"}, mức=${parsedValue}%.`,
       entityType: "DEVICE",
       entityId: Number(deviceId),
       deviceId: Number(deviceId)
@@ -738,9 +849,7 @@ app.get("/api/recipes", async (req, res) => {
                 flower_type,
                 creator AS creator_id,
                 (SELECT user_name FROM [User] WHERE user_id = Recipe.creator) AS creator_name,
-                description,
-                status,
-                CONVERT(VARCHAR(10), created_date, 23) AS created_date
+                description
             FROM Recipe
         `);
     res.json(result.recordset);
@@ -760,9 +869,7 @@ app.get("/api/recipes/:id", async (req, res) => {
                     flower_type,
                     creator AS creator_id,
                     (SELECT user_name FROM [User] WHERE user_id = Recipe.creator) AS creator_name,
-                    description,
-                    status,
-                    CONVERT(VARCHAR(10), created_date, 23) AS created_date
+                    description
                 FROM Recipe WHERE recipe_id = @id
             `);
     if (result.recordset.length === 0) {
@@ -776,21 +883,21 @@ app.get("/api/recipes/:id", async (req, res) => {
 
 app.post("/api/recipes", async (req, res) => {
   try {
-    const { name, flower_type, creator_id, description, status, created_date } = req.body;
+    const { name, flower_type, description } = req.body;
+    if (!String(name || "").trim() || !String(flower_type || "").trim()) {
+      return res.status(400).json({ error: "Tên công thức và loại hoa là bắt buộc" });
+    }
     const pool = await getConnection();
     const actorUserId = getActorUserId(req);
     const result = await pool
       .request()
       .input("name", sql.NVarChar, name)
       .input("flower_type", sql.NVarChar, flower_type)
-      .input("creator_id", sql.Int, creator_id)
-      .input("description", sql.NVarChar, description)
-      .input("status", sql.NVarChar, status || "active")
-      .input("created_date", sql.Date, created_date || new Date().toISOString().slice(0, 10))
-      .query(`
+      .input("creator_id", sql.Int, actorUserId)
+      .input("description", sql.NVarChar, description).query(`
                 INSERT INTO Recipe (recipe_name, flower_type, creator, description, status, created_date)
                 OUTPUT INSERTED.recipe_id AS id
-                VALUES (@name, @flower_type, @creator_id, @description, @status, @created_date)
+                VALUES (@name, @flower_type, @creator_id, @description, 'active', CAST(GETDATE() AS DATE))
             `);
     await writeAuditLog(pool, {
       userId: actorUserId,
@@ -810,7 +917,10 @@ app.post("/api/recipes", async (req, res) => {
 app.put("/api/recipes/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, flower_type, creator_id, description, status, created_date } = req.body;
+    const { name, flower_type, description } = req.body;
+    if (!String(name || "").trim() || !String(flower_type || "").trim()) {
+      return res.status(400).json({ error: "Tên công thức và loại hoa là bắt buộc" });
+    }
     const pool = await getConnection();
     const actorUserId = getActorUserId(req);
     await pool
@@ -818,22 +928,16 @@ app.put("/api/recipes/:id", async (req, res) => {
       .input("id", sql.Int, id)
       .input("name", sql.NVarChar, name)
       .input("flower_type", sql.NVarChar, flower_type)
-      .input("creator_id", sql.Int, creator_id)
-      .input("description", sql.NVarChar, description)
-      .input("status", sql.NVarChar, status)
-      .input("created_date", sql.Date, created_date).query(`
+      .input("description", sql.NVarChar, description).query(`
                 UPDATE Recipe SET
                     recipe_name = @name,
                     flower_type = @flower_type,
-                    creator = @creator_id,
-                    description = @description,
-                    status = @status,
-                    created_date = @created_date
+                    description = @description
                 WHERE recipe_id = @id
             `);
     await writeAuditLog(pool, {
       userId: actorUserId,
-      action: `Cập nhật công thức "${name}" (trạng thái ${status}).`,
+      action: `Cập nhật công thức "${name}".`,
       entityType: "RECIPE",
       entityId: Number(id)
     });
@@ -894,9 +998,7 @@ app.get("/api/recipes/:recipeId/stages", async (req, res) => {
                     stage_id AS id,
                     stage_name AS name,
                     start_day,
-                    end_day,
-                    completed,
-                    current_day AS currentDay
+                    end_day
                 FROM GrowthStage
                 WHERE recipe_id = @recipeId
                 ORDER BY start_day
@@ -1467,11 +1569,43 @@ app.delete("/api/zones/:id", async (req, res) => {
 // 15. API GROWTH STAGES (CRUD)
 // ======================================================================
 
+const REQUIRED_THRESHOLD_METRICS = [
+  "Temperature",
+  "Humidity",
+  "Light",
+  "SoilHumidity",
+  "PH",
+  "CO2"
+];
+
+function validateStageInput({ name, start_day, end_day, thresholds }) {
+  if (!String(name || "").trim()) return "Tên giai đoạn là bắt buộc";
+  if (!Number.isInteger(Number(start_day)) || !Number.isInteger(Number(end_day)) ||
+      Number(start_day) < 1 || Number(start_day) > Number(end_day)) {
+    return "Khoảng ngày của giai đoạn không hợp lệ";
+  }
+  if (!Array.isArray(thresholds) || thresholds.length !== REQUIRED_THRESHOLD_METRICS.length) {
+    return "Mỗi giai đoạn phải có đủ 6 điều kiện môi trường";
+  }
+  const metrics = new Set(thresholds.map((item) => item.metric_type));
+  if (metrics.size !== REQUIRED_THRESHOLD_METRICS.length ||
+      REQUIRED_THRESHOLD_METRICS.some((metric) => !metrics.has(metric))) {
+    return "Danh sách điều kiện môi trường không hợp lệ";
+  }
+  if (thresholds.some((item) => !Number.isFinite(Number(item.min_value)) ||
+      !Number.isFinite(Number(item.max_value)) || Number(item.min_value) > Number(item.max_value))) {
+    return "Giá trị Min/Max của điều kiện không hợp lệ";
+  }
+  return null;
+}
+
 // POST /api/recipes/:recipeId/stages - Thêm stage mới
 app.post("/api/recipes/:recipeId/stages", async (req, res) => {
   try {
     const { recipeId } = req.params;
-    const { name, start_day, end_day, completed, currentDay, thresholds } = req.body;
+    const { name, start_day, end_day, thresholds } = req.body;
+    const validationError = validateStageInput(req.body);
+    if (validationError) return res.status(400).json({ error: validationError });
     const pool = await getConnection();
     const actorUserId = getActorUserId(req);
 
@@ -1491,8 +1625,8 @@ app.post("/api/recipes/:recipeId/stages", async (req, res) => {
       .input("name", sql.NVarChar, name)
       .input("start_day", sql.Int, start_day)
       .input("end_day", sql.Int, end_day)
-      .input("completed", sql.Bit, completed || false)
-      .input("currentDay", sql.Int, currentDay || null).query(`
+      .input("completed", sql.Bit, false)
+      .input("currentDay", sql.Int, null).query(`
                 INSERT INTO GrowthStage (recipe_id, stage_name, start_day, end_day, completed, current_day)
                 OUTPUT INSERTED.stage_id AS id
                 VALUES (@recipeId, @name, @start_day, @end_day, @completed, @currentDay)
@@ -1532,7 +1666,9 @@ app.post("/api/recipes/:recipeId/stages", async (req, res) => {
 app.put("/api/stages/:stageId", async (req, res) => {
   try {
     const { stageId } = req.params;
-    const { name, start_day, end_day, completed, currentDay, thresholds } = req.body;
+    const { name, start_day, end_day, thresholds } = req.body;
+    const validationError = validateStageInput(req.body);
+    if (validationError) return res.status(400).json({ error: validationError });
     const pool = await getConnection();
     const actorUserId = getActorUserId(req);
 
@@ -1552,8 +1688,8 @@ app.put("/api/stages/:stageId", async (req, res) => {
       .input("name", sql.NVarChar, name)
       .input("start_day", sql.Int, start_day)
       .input("end_day", sql.Int, end_day)
-      .input("completed", sql.Bit, completed)
-      .input("currentDay", sql.Int, currentDay || null).query(`
+      .input("completed", sql.Bit, false)
+      .input("currentDay", sql.Int, null).query(`
                 UPDATE GrowthStage SET
                     stage_name = @name,
                     start_day = @start_day,

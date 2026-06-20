@@ -7,7 +7,6 @@
  */
 
 import { showToast, openModal, closeModal } from "./app.js";
-import { getCurrentUser } from "./auth.js";
 import { escapeHtml } from "./utils.js";
 import {
   getRecipes,
@@ -16,6 +15,10 @@ import {
   deleteRecipe,
   getStages,
   getThresholds,
+  getZones,
+  getAlerts,
+  getSensorData,
+  updateZoneCycle,
   createStage,
   updateStage,
   deleteStage
@@ -23,11 +26,29 @@ import {
 
 // ===================== BIẾN TOÀN CỤC =====================
 let recipes = [];
+let growthZones = [];
+let growthAlerts = [];
+let growthSensorData = [];
+const selectedZoneByRecipe = {};
+const METRIC_LABELS = {
+  Temperature: "Nhiệt độ (°C)",
+  Humidity: "Độ ẩm không khí (%)",
+  Light: "Ánh sáng (lux)",
+  SoilHumidity: "Độ ẩm đất (%)",
+  PH: "Độ pH",
+  CO2: "CO2 (ppm)"
+};
 
 // ===================== LOAD DỮ LIỆU =====================
 async function loadRecipes() {
   try {
-    recipes = await getRecipes();
+    const [loadedRecipes, loadedZones, loadedAlerts, loadedSensorData] = await Promise.all([
+      getRecipes(), getZones(), getAlerts(), getSensorData(null, 1000)
+    ]);
+    recipes = loadedRecipes;
+    growthZones = loadedZones.filter((item) => item.type === "zone");
+    growthAlerts = loadedAlerts;
+    growthSensorData = loadedSensorData;
     await Promise.all(
       recipes.map(async (recipe) => {
         const stages = await getStages(recipe.id);
@@ -46,6 +67,73 @@ async function loadRecipes() {
   }
 }
 
+function getZoneCycle(recipe, zone) {
+  if (!zone?.start_date || !recipe.stages?.length) return null;
+  const startDate = new Date(`${zone.start_date}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const adjustmentDays = Math.max(0, Number(zone.cycle_adjustment_days) || 0);
+  const currentDay = Math.max(0, Math.floor((today - startDate) / 86400000) + 1 - adjustmentDays);
+  const totalDays = Math.max(...recipe.stages.map((stage) => Number(stage.end_day)));
+  const currentStage = recipe.stages.find(
+    (stage) => currentDay >= Number(stage.start_day) && currentDay <= Number(stage.end_day)
+  );
+  return { currentDay, totalDays, currentStage, progress: Math.min(100, Math.round(currentDay / totalDays * 100)) };
+}
+
+function latestMetricValues(zoneId) {
+  const latest = {};
+  growthSensorData.filter((row) => String(row.zoneId) === String(zoneId)).forEach((row) => {
+    if (!latest[row.metricType] || new Date(row.timestamp) > new Date(latest[row.metricType].timestamp)) {
+      latest[row.metricType] = row;
+    }
+  });
+  return latest;
+}
+
+function renderZoneTracking(recipe) {
+  const appliedZones = growthZones.filter((zone) => String(zone.recipe_id) === String(recipe.id));
+  if (!appliedZones.length) return '<div class="form-helper" style="margin-top:16px">Chưa có khu vực áp dụng công thức này.</div>';
+  const selectedId = selectedZoneByRecipe[recipe.id] || appliedZones[0].id;
+  selectedZoneByRecipe[recipe.id] = selectedId;
+  const zone = appliedZones.find((item) => String(item.id) === String(selectedId)) || appliedZones[0];
+  const cycle = getZoneCycle(recipe, zone);
+  const values = latestMetricValues(zone.id);
+  const thresholds = cycle?.currentStage?.thresholds || [];
+  const thresholdHtml = THRESHOLD_METRICS.map((metric) => {
+    const threshold = thresholds.find((item) => item.metric_type === metric.key);
+    const actual = values[metric.key]?.value;
+    const hasValue = actual !== undefined && actual !== null;
+    const inRange = hasValue && threshold && Number(actual) >= Number(threshold.min_value) && Number(actual) <= Number(threshold.max_value);
+    return `<div class="card" style="padding:9px">
+      <strong>${metric.label}</strong>: ${threshold ? `${threshold.min_value} - ${threshold.max_value} ${metric.unit}` : "Chưa cấu hình"}
+      <div><span class="chip ${!hasValue ? "chip-default" : inRange ? "chip-success" : "chip-warning"}">
+        ${!hasValue ? "Chưa có dữ liệu" : `${actual} ${metric.unit} · ${inRange ? "Đạt" : "Ngoài ngưỡng"}`}
+      </span></div>
+    </div>`;
+  }).join("");
+  const alerts = growthAlerts.filter((alert) => String(alert.zone_id) === String(zone.id) && alert.status !== "resolved");
+  const alertHtml = alerts.length ? alerts.map((alert) => `<div class="warn-box" style="margin-bottom:6px"><strong>${escapeHtml(alert.title)}</strong><br>${escapeHtml(alert.description)}</div>`).join("") : '<div class="form-helper">Không có cảnh báo đang hoạt động.</div>';
+  return `<div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:14px">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:end;flex-wrap:wrap">
+      <div class="form-group" style="margin:0;min-width:260px">
+        <label class="form-label" for="recipe-zone-${recipe.id}">Khu vực đang áp dụng</label>
+        <select class="form-select recipe-zone-select" id="recipe-zone-${recipe.id}" data-recipe-id="${recipe.id}">
+          ${appliedZones.map((item) => `<option value="${item.id}" ${String(item.id) === String(zone.id) ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}
+        </select>
+      </div>
+      <button class="btn btn-outline adjust-growth-cycle" data-zone-id="${zone.id}" data-zone-name="${escapeHtml(zone.name)}">Điều chỉnh chu kỳ</button>
+    </div>
+    ${cycle ? `<div style="margin:14px 0">
+      <div style="display:flex;justify-content:space-between"><strong>${cycle.currentStage ? escapeHtml(cycle.currentStage.name) : "Ngoài chu kỳ"}</strong><span>Ngày ${Math.min(cycle.currentDay, cycle.totalDays)}/${cycle.totalDays} · ${cycle.progress}%</span></div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${cycle.progress}%"></div></div>
+    </div>` : '<div class="form-helper">Khu vực chưa có ngày bắt đầu.</div>'}
+    <div class="subtitle">6 điều kiện môi trường</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px">${thresholdHtml}</div>
+    <div class="subtitle" style="margin-top:14px">Cảnh báo khu vực</div>${alertHtml}
+  </div>`;
+}
+
 // ===================== RENDER DANH SÁCH =====================
 
 export async function renderGrowth() {
@@ -58,42 +146,26 @@ export async function renderGrowth() {
     return;
   }
 
-  const statusMap = {
-    active: "chip-success",
-    delayed: "chip-warning",
-    completed: "chip-default"
-  };
-  const statusLabel = {
-    active: "Đang hoạt động",
-    delayed: "Bị trễ",
-    completed: "Hoàn thành"
-  };
-
   container.innerHTML = recipes
     .map((recipe) => {
       const stagesHtml = recipe.stages
         .map((stage, idx) => {
-          let stageClass = "stage-pending";
-          if (stage.completed) stageClass = "stage-completed";
-          else if (stage.currentDay && !stage.completed) stageClass = "stage-current";
-
           const thresholdsHtml = (stage.thresholds || [])
             .map(
               (th) =>
                 `<span class="chip chip-default" style="font-size:0.7rem">
-                    ${escapeHtml(th.metric_type)}: ${th.min_value} - ${th.max_value}
+                    ${escapeHtml(METRIC_LABELS[th.metric_type] || th.metric_type)}: ${th.min_value} - ${th.max_value}
                 </span>`
             )
             .join("");
 
           return `
-                <div class="${stageClass} stage-card">
+                <div class="stage-card">
                     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
                         <div style="font-weight:600;font-size:0.875rem">${idx + 1}. ${escapeHtml(stage.name)}</div>
-                        ${stage.completed ? '<span class="chip chip-success" style="font-size:0.7rem">Hoàn thành</span>' : ""}
                     </div>
                     <div style="font-size:0.78rem;color:#6b7280;margin-bottom:6px">
-                        Ngày ${stage.start_day} - ${stage.end_day} ${stage.currentDay !== null && stage.currentDay !== undefined ? `(đã: ${stage.currentDay})` : ""}
+                        Ngày ${stage.start_day} - ${stage.end_day}
                     </div>
                     <div style="display:flex;gap:4px;flex-wrap:wrap">${thresholdsHtml}</div>
                 </div>
@@ -111,7 +183,6 @@ export async function renderGrowth() {
                             <div style="display:flex;gap:6px;flex-wrap:wrap">
                                 <span class="chip chip-outlined-primary">${escapeHtml(recipe.flower_type)}</span>
                                 <span class="chip chip-default">${escapeHtml(recipe.creator_name || "Kỹ thuật viên")}</span>
-                                <span class="chip ${statusMap[recipe.status] || "chip-default"}">${escapeHtml(statusLabel[recipe.status] || recipe.status)}</span>
                             </div>
                         </div>
                     </div>
@@ -120,10 +191,9 @@ export async function renderGrowth() {
                         <button class="btn-icon delete-btn" data-id="${recipe.id}" title="Xóa">🗑️</button>
                     </div>
                 </div>
-                <div class="grid grid-4">${stagesHtml}</div>
-                <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(0,0,0,0.08);font-size:0.78rem;color:#9ca3af">
-                    Ngày tạo: ${escapeHtml(recipe.created_date || "N/A")} | ${escapeHtml(recipe.description || "")}
-                </div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">${stagesHtml}</div>
+                ${recipe.description ? `<div style="margin-top:12px;font-size:0.82rem;color:#6b7280">${escapeHtml(recipe.description)}</div>` : ""}
+                ${renderZoneTracking(recipe)}
             </div>
         `;
     })
@@ -136,6 +206,45 @@ export async function renderGrowth() {
   document.querySelectorAll(".delete-btn").forEach((btn) => {
     btn.onclick = () => handleDeleteRecipe(btn.dataset.id);
   });
+  document.querySelectorAll(".recipe-zone-select").forEach((select) => {
+    select.onchange = () => {
+      selectedZoneByRecipe[select.dataset.recipeId] = select.value;
+      renderGrowth();
+    };
+  });
+  document.querySelectorAll(".adjust-growth-cycle").forEach((button) => {
+    button.onclick = () => openCycleAdjustmentModal(button.dataset.zoneId, button.dataset.zoneName);
+  });
+}
+
+function openCycleAdjustmentModal(zoneId, zoneName) {
+  const zone = growthZones.find((item) => String(item.id) === String(zoneId));
+  if (!zone) return;
+  document.getElementById("growth-cycle-modal")?.remove();
+  document.body.insertAdjacentHTML("beforeend", `<div class="modal-overlay" id="growth-cycle-modal">
+    <div class="modal" style="width:460px;max-width:95vw">
+      <div class="modal-title">Điều chỉnh chu kỳ - ${escapeHtml(zoneName)}</div>
+      <div class="form-group"><label class="form-label" for="growth-adjustment-days">Số ngày điều chỉnh</label>
+        <input class="form-input" id="growth-adjustment-days" type="number" min="0" max="365" value="${Number(zone.cycle_adjustment_days) || 0}"></div>
+      <div class="form-group"><label class="form-label" for="growth-adjustment-reason">Lý do</label>
+        <textarea class="form-input" id="growth-adjustment-reason" rows="3" placeholder="Nhập lý do điều chỉnh">${escapeHtml(zone.adjustment_reason || "")}</textarea></div>
+      <div class="modal-actions"><button class="btn btn-outline" id="cancel-growth-cycle">Hủy</button><button class="btn btn-primary" id="save-growth-cycle">Lưu</button></div>
+    </div></div>`);
+  const modal = document.getElementById("growth-cycle-modal");
+  openModal("growth-cycle-modal");
+  document.getElementById("cancel-growth-cycle").onclick = () => modal.remove();
+  document.getElementById("save-growth-cycle").onclick = async () => {
+    const days = Number(document.getElementById("growth-adjustment-days").value);
+    const reason = document.getElementById("growth-adjustment-reason").value.trim();
+    if (!Number.isInteger(days) || days < 0 || days > 365 || !reason) return showToast("Nhập số ngày 0-365 và lý do điều chỉnh", "warning");
+    try {
+      await updateZoneCycle(zoneId, days, reason);
+      modal.remove();
+      await loadRecipes();
+      await renderGrowth();
+      showToast("Đã điều chỉnh chu kỳ khu vực", "success");
+    } catch (err) { showToast("Lỗi điều chỉnh chu kỳ: " + err.message, "error"); }
+  };
 }
 
 // ===================== XÓA CÔNG THỨC (Đã đổi tên) =====================
@@ -162,34 +271,18 @@ function editRecipe(id) {
 // ===================== THÊM / SỬA CÔNG THỨC (MODAL) =====================
 let tempStages = [];
 let editingRecipeId = null;
-const ALLOWED_THRESHOLD_METRICS = new Set([
-  "Temperature",
-  "Humidity",
-  "SoilHumidity",
-  "Light",
-  "CO2",
-  "PH"
-]);
+const THRESHOLD_METRICS = [
+  { key: "Temperature", label: "Nhiệt độ", unit: "°C" },
+  { key: "Humidity", label: "Độ ẩm không khí", unit: "%" },
+  { key: "Light", label: "Cường độ ánh sáng", unit: "lux" },
+  { key: "SoilHumidity", label: "Độ ẩm đất", unit: "%" },
+  { key: "PH", label: "Độ pH", unit: "pH" },
+  { key: "CO2", label: "Nồng độ CO2", unit: "ppm" }
+];
 
-function parseThresholds(raw) {
-  const tokens = raw
-    .split(",")
-    .map((token) => token.trim())
-    .filter(Boolean);
-  const thresholds = [];
-  for (const token of tokens) {
-    const match = token.match(/^([A-Za-z][A-Za-z0-9]*):(-?\d+(?:\.\d+)?)-(-?\d+(?:\.\d+)?)$/);
-    if (!match || !ALLOWED_THRESHOLD_METRICS.has(match[1])) {
-      return { thresholds: [], error: `Ngưỡng không hợp lệ: ${token}` };
-    }
-    const minValue = Number(match[2]);
-    const maxValue = Number(match[3]);
-    if (minValue > maxValue) {
-      return { thresholds: [], error: `Min phải nhỏ hơn hoặc bằng max: ${token}` };
-    }
-    thresholds.push({ metric_type: match[1], min_value: minValue, max_value: maxValue });
-  }
-  return { thresholds, error: null };
+function thresholdValue(stage, metric, field) {
+  const threshold = (stage.thresholds || []).find((item) => item.metric_type === metric);
+  return threshold?.[field] ?? "";
 }
 
 function renderStageInputs() {
@@ -216,10 +309,15 @@ function renderStageInputs() {
                     <button class="btn-icon remove-stage" data-idx="${idx}" style="margin-top:24px;">🗑️</button>
                 </div>
             </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:150px;">
-                    <label>Ngưỡng (metric:min-max)</label>
-                    <input class="form-input stage-thresholds" data-idx="${idx}" value="${(stage.thresholds || []).map((t) => t.metric_type + ":" + t.min_value + "-" + t.max_value).join(", ")}" placeholder="VD: Temperature:22-26, SoilHumidity:70-85">
+            <div style="margin-top:10px">
+                <label style="font-weight:600">Điều kiện môi trường</label>
+                <div style="display:grid;grid-template-columns:minmax(150px,2fr) 1fr 1fr;gap:6px;align-items:center;margin-top:6px">
+                    <span></span><small>Min</small><small>Max</small>
+                    ${THRESHOLD_METRICS.map((metric) => `
+                        <span>${metric.label} (${metric.unit})</span>
+                        <input class="form-input threshold-value" type="number" step="any" data-idx="${idx}" data-metric="${metric.key}" data-field="min_value" value="${thresholdValue(stage, metric.key, "min_value")}" required>
+                        <input class="form-input threshold-value" type="number" step="any" data-idx="${idx}" data-metric="${metric.key}" data-field="max_value" value="${thresholdValue(stage, metric.key, "max_value")}" required>
+                    `).join("")}
                 </div>
             </div>
         </div>
@@ -243,11 +341,16 @@ function renderStageInputs() {
       tempStages[e.target.dataset.idx].end_day = parseInt(e.target.value) || 1;
     };
   });
-  document.querySelectorAll(".stage-thresholds").forEach((inp) => {
+  document.querySelectorAll(".threshold-value").forEach((inp) => {
     inp.oninput = (e) => {
-      const parsed = parseThresholds(e.target.value);
-      tempStages[e.target.dataset.idx].thresholds = parsed.thresholds;
-      tempStages[e.target.dataset.idx].thresholdError = parsed.error;
+      const { idx, metric, field } = e.target.dataset;
+      const stage = tempStages[idx];
+      let threshold = stage.thresholds.find((item) => item.metric_type === metric);
+      if (!threshold) {
+        threshold = { metric_type: metric, min_value: "", max_value: "" };
+        stage.thresholds.push(threshold);
+      }
+      threshold[field] = e.target.value === "" ? "" : Number(e.target.value);
     };
   });
   document.querySelectorAll(".remove-stage").forEach((btn) => {
@@ -273,23 +376,15 @@ function openRecipeModal(editData = null) {
         name: "",
         start_day: 1,
         end_day: 10,
-        thresholds: [],
-        completed: false,
-        currentDay: null
+        thresholds: []
       }
     ];
   }
 
-  const modalTitle = editData ? "Chỉnh sửa công thức" : "Tạo công thức sinh trưởng mới";
+  const modalTitle = editData ? "✏️ Chỉnh sửa công thức" : "🌱 Tạo công thức sinh trưởng mới";
   const nameValue = editData ? editData.name : "";
   const flowerValue = editData ? editData.flower_type : "";
-  const creatorValue = editData ? editData.creator_name : "";
-  const currentUser = getCurrentUser();
-  const creatorId = editData?.creator_id || currentUser?.id || 1;
-  const effectiveCreatorName = creatorValue || currentUser?.username || "Người dùng hiện tại";
-  const recipeStatus = editData?.status || "active";
   const descValue = editData ? editData.description : "";
-  const dateValue = editData ? editData.created_date : new Date().toISOString().slice(0, 10);
 
   const modalHtml = `
         <div class="modal-overlay" id="recipe-modal">
@@ -305,16 +400,8 @@ function openRecipeModal(editData = null) {
                         <input class="form-input" id="recipe-flower" value="${escapeHtml(flowerValue)}" placeholder="Hoa Hồng, Hoa Cúc, ...">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Người tạo</label>
-                        <input class="form-input" id="recipe-creator" value="${escapeHtml(effectiveCreatorName)}" readonly>
-                    </div>
-                    <div class="form-group">
                         <label class="form-label">Mô tả</label>
                         <input class="form-input" id="recipe-desc" value="${escapeHtml(descValue)}" placeholder="Mô tả công thức">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Ngày tạo</label>
-                        <input class="form-input" type="date" id="recipe-date" value="${dateValue}">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Các giai đoạn</label>
@@ -338,9 +425,7 @@ function openRecipeModal(editData = null) {
       name: "",
       start_day: 1,
       end_day: 10,
-      thresholds: [],
-      completed: false,
-      currentDay: null
+      thresholds: []
     });
     renderStageInputs();
   };
@@ -351,11 +436,9 @@ function openRecipeModal(editData = null) {
   document.getElementById("save-recipe").onclick = async () => {
     const name = document.getElementById("recipe-name").value.trim();
     const flower_type = document.getElementById("recipe-flower").value.trim();
-    const creator_name = document.getElementById("recipe-creator").value.trim();
     const description = document.getElementById("recipe-desc").value.trim();
-    const created_date = document.getElementById("recipe-date").value;
-    if (!name || !flower_type || !created_date) {
-      showToast("Vui lòng điền đầy đủ thông tin (tên, loại hoa, ngày)", "warning");
+    if (!name || !flower_type) {
+      showToast("Vui lòng nhập tên công thức và loại hoa", "warning");
       return;
     }
     if (tempStages.length === 0) {
@@ -375,8 +458,13 @@ function openRecipeModal(editData = null) {
         showToast(`Giai đoạn ${i + 1} đang chồng thời gian với giai đoạn trước`, "warning");
         return;
       }
-      if (tempStages[i].thresholdError) {
-        showToast(`Giai đoạn ${i + 1}: ${tempStages[i].thresholdError}`, "warning");
+      if (tempStages[i].thresholds.length !== THRESHOLD_METRICS.length ||
+          tempStages[i].thresholds.some((item) => item.min_value === "" || item.max_value === "")) {
+        showToast(`Giai đoạn ${i + 1}: cần nhập đủ Min/Max cho 6 điều kiện`, "warning");
+        return;
+      }
+      if (tempStages[i].thresholds.some((item) => Number(item.min_value) > Number(item.max_value))) {
+        showToast(`Giai đoạn ${i + 1}: giá trị Min không được lớn hơn Max`, "warning");
         return;
       }
     }
@@ -385,8 +473,6 @@ function openRecipeModal(editData = null) {
       name: s.name,
       start_day: s.start_day,
       end_day: s.end_day,
-      completed: s.completed || false,
-      currentDay: s.currentDay ?? null,
       thresholds: s.thresholds || []
     }));
 
@@ -397,11 +483,7 @@ function openRecipeModal(editData = null) {
         await updateRecipe(editingRecipeId, {
           name,
           flower_type,
-          creator_id: creatorId,
-          creator_name,
-          description,
-          status: recipeStatus,
-          created_date
+          description
         });
         recipeId = editingRecipeId;
         const savedStageIds = new Set(stages.filter((stage) => stage.id).map((stage) => stage.id));
@@ -413,11 +495,7 @@ function openRecipeModal(editData = null) {
         const newRecipe = await createRecipe({
           name,
           flower_type,
-          creator_id: creatorId,
-          creator_name,
-          description,
-          status: recipeStatus,
-          created_date
+          description
         });
         recipeId = newRecipe.id;
         recipes.push(newRecipe);
@@ -458,7 +536,7 @@ export async function renderGrowthPage() {
                 <div class="page-title">Chu kỳ Sinh trưởng</div>
                 <div class="page-sub">Quản lý công thức, giai đoạn và ngưỡng điều kiện</div>
             </div>
-            <button class="btn btn-primary" id="add-recipe-btn">➕ Tạo công thức mới</button>
+            <button class="btn btn-primary" id="add-recipe-btn" title="Tạo công thức sinh trưởng mới">🌱 Tạo công thức mới</button>
         </div>
         <div id="growth-list"></div>
     `;

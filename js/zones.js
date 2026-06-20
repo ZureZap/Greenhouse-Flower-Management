@@ -11,10 +11,8 @@ import {
   getZones,
   getRecipes,
   getStages,
-  getThresholds,
   createZone,
   updateZone,
-  updateZoneCycle,
   deleteZone
 } from "./api.js";
 
@@ -112,16 +110,9 @@ async function getRecipeList(forceReload = false) {
   if (forceReload || recipesCache.length === 0) {
     try {
       recipesCache = await getRecipes();
-      await Promise.all(
-        recipesCache.map(async (recipe) => {
-          recipe.stages = await getStages(recipe.id);
-          await Promise.all(
-            recipe.stages.map(async (stage) => {
-              stage.thresholds = await getThresholds(stage.id);
-            })
-          );
-        })
-      );
+      await Promise.all(recipesCache.map(async (recipe) => {
+        recipe.stages = await getStages(recipe.id);
+      }));
     } catch (err) {
       console.error("Lỗi lấy danh sách recipe:", err);
       recipesCache = [];
@@ -138,60 +129,6 @@ function renderZoneTree() {
   currentSearchKeyword = keyword;
   const html = buildTreeHtml(zones, keyword, 0);
   treeContainer.innerHTML = html || '<div class="no-result">Không tìm thấy vùng phù hợp</div>';
-}
-
-function getZoneCycle(zone) {
-  const recipe = recipesCache.find((item) => String(item.id) === String(zone.recipe_id));
-  const stages = [...(recipe?.stages || [])].sort((a, b) => a.start_day - b.start_day);
-  if (!recipe || !zone.start_date || stages.length === 0) return null;
-
-  const startDate = new Date(`${zone.start_date}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  if (Number.isNaN(startDate.getTime())) return null;
-
-  const elapsedDay = Math.floor((today - startDate) / 86400000) + 1;
-  const adjustmentDays = Math.max(0, Number(zone.cycle_adjustment_days) || 0);
-  const currentDay = Math.max(0, elapsedDay - adjustmentDays);
-  const totalDays = Math.max(...stages.map((stage) => Number(stage.end_day) || 0));
-  const progress = totalDays > 0 ? Math.min(100, Math.round((currentDay / totalDays) * 100)) : 0;
-  const currentStage = stages.find(
-    (stage) => currentDay >= stage.start_day && currentDay <= stage.end_day
-  );
-  const expectedEndDate = new Date(startDate);
-  expectedEndDate.setDate(expectedEndDate.getDate() + totalDays + adjustmentDays - 1);
-
-  return {
-    recipe,
-    stages,
-    currentStage,
-    currentDay,
-    totalDays,
-    progress,
-    adjustmentDays,
-    expectedEndDate
-  };
-}
-
-function renderCurrentThresholds(zone, stage) {
-  if (!stage?.thresholds?.length) return '<div class="form-helper">Chưa cấu hình ngưỡng.</div>';
-  const actualValues = { Temperature: zone.temperature, Humidity: zone.humidity };
-  return stage.thresholds
-    .map((threshold) => {
-      const actual = actualValues[threshold.metric_type];
-      const hasActual = actual !== null && actual !== undefined && Number.isFinite(Number(actual));
-      const inRange =
-        hasActual &&
-        Number(actual) >= Number(threshold.min_value) &&
-        Number(actual) <= Number(threshold.max_value);
-      return `<div class="card" style="padding:10px">
-        <strong>${escapeHtml(threshold.metric_type)}</strong>: ${threshold.min_value} - ${threshold.max_value}
-        <span class="chip ${!hasActual ? "chip-default" : inRange ? "chip-success" : "chip-warning"}" style="margin-left:6px">
-          ${!hasActual ? "Chưa có dữ liệu" : `${actual} - ${inRange ? "Đạt" : "Ngoài ngưỡng"}`}
-        </span>
-      </div>`;
-    })
-    .join("");
 }
 
 // ===================== RENDER CHI TIẾT =====================
@@ -219,7 +156,22 @@ function renderZoneDetail() {
 
   if (zone.type === "zone") {
     const currentRecipe = recipesCache.find((r) => String(r.id) === String(zone.recipe_id));
-    const cycle = getZoneCycle(zone);
+    const stages = [...(currentRecipe?.stages || [])].sort((a, b) => a.start_day - b.start_day);
+    let progressHtml = "";
+    if (currentRecipe && zone.start_date && stages.length) {
+      const start = new Date(`${zone.start_date}T00:00:00`);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const currentDay = Math.max(0, Math.floor((today - start) / 86400000) + 1 - (Number(zone.cycle_adjustment_days) || 0));
+      const totalDays = Math.max(...stages.map((stage) => Number(stage.end_day)));
+      const currentStage = stages.find((stage) => currentDay >= stage.start_day && currentDay <= stage.end_day);
+      const progress = Math.min(100, Math.round(currentDay / totalDays * 100));
+      progressHtml = `<div class="card" style="margin-top:12px;padding:14px">
+        <div style="display:flex;justify-content:space-between"><strong>Tiến độ sinh trưởng</strong><span>${progress}%</span></div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${progress}%"></div></div>
+        <div class="form-helper">Ngày ${Math.min(currentDay, totalDays)}/${totalDays} · ${currentStage ? escapeHtml(currentStage.name) : currentDay > totalDays ? "Đã hoàn thành" : "Chưa bắt đầu"}</div>
+      </div>`;
+    }
     html += `
             <div class="grid grid-2 zone-metrics">
                 <div class="metric-card temp">🌡️ Nhiệt độ: <strong>${zone.temperature ?? "--"}°C</strong></div>
@@ -229,55 +181,8 @@ function renderZoneDetail() {
                 <div><strong>Công thức áp dụng:</strong> ${currentRecipe ? currentRecipe.name : "Chưa có"}</div>
                 <div><strong>Ngày bắt đầu:</strong> ${zone.start_date || "Chưa có"}</div>
             </div>
+            ${progressHtml}
         `;
-    if (cycle) {
-      const timeline = cycle.stages
-        .map((stage) => {
-          const stageState =
-            cycle.currentDay > stage.end_day
-              ? "stage-completed"
-              : cycle.currentStage?.id === stage.id
-                ? "stage-current"
-                : "stage-pending";
-          const marker =
-            stageState === "stage-completed" ? "✓" : stageState === "stage-current" ? "●" : "○";
-          return `<div class="${stageState} stage-card" style="margin-bottom:8px">
-            <strong>${marker} ${escapeHtml(stage.name)}</strong>
-            <div class="form-helper">Ngày ${stage.start_day} - ${stage.end_day}</div>
-          </div>`;
-        })
-        .join("");
-      html += `
-        <div class="card" style="margin:16px 0;padding:16px">
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px">
-            <div>
-              <div class="subtitle" style="margin:0">Tiến độ chu kỳ</div>
-              <div class="form-helper">
-                ${cycle.currentStage ? `Giai đoạn: ${escapeHtml(cycle.currentStage.name)}` : cycle.currentDay > cycle.totalDays ? "Đã hoàn thành chu kỳ" : "Chưa tới giai đoạn cấu hình"}
-              </div>
-            </div>
-            <button class="btn btn-outline btn-sm adjust-zone-cycle" data-key="${zone._key}">Điều chỉnh chu kỳ</button>
-          </div>
-          <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:6px">
-            <span>Ngày ${Math.min(cycle.currentDay, cycle.totalDays)} / ${cycle.totalDays}</span>
-            <strong>${cycle.progress}%</strong>
-          </div>
-          <div class="progress-bar"><div class="progress-fill" style="width:${cycle.progress}%"></div></div>
-          <div class="form-helper" style="margin-top:8px">
-            Dự kiến hoàn thành: ${cycle.expectedEndDate.toLocaleDateString("vi-VN")}
-            · Điều chỉnh: +${cycle.adjustmentDays} ngày
-            ${zone.adjustment_reason ? `· Lý do: ${escapeHtml(zone.adjustment_reason)}` : ""}
-          </div>
-        </div>
-        <div class="grid grid-2" style="align-items:start">
-          <div><div class="subtitle">Timeline giai đoạn</div>${timeline}</div>
-          <div><div class="subtitle">Ngưỡng giai đoạn hiện tại</div>${renderCurrentThresholds(zone, cycle.currentStage)}</div>
-        </div>
-      `;
-    } else if (currentRecipe) {
-      html +=
-        '<div class="card" style="margin-top:16px">Hãy nhập ngày bắt đầu để theo dõi tiến độ.</div>';
-    }
   }
 
   if (zone.children?.length) {
@@ -312,64 +217,6 @@ function attachDetailEvents() {
   document.querySelectorAll(".delete-zone, .delete-child").forEach((btn) => {
     btn.removeEventListener("click", handleDeleteClick);
     btn.addEventListener("click", handleDeleteClick);
-  });
-  document.querySelectorAll(".adjust-zone-cycle").forEach((btn) => {
-    btn.addEventListener("click", () => openZoneCycleModal(btn.dataset.key));
-  });
-}
-
-function openZoneCycleModal(key) {
-  const zone = findNodeById(zones, key);
-  if (!zone || zone.type !== "zone") return;
-  const modalHtml = `
-    <div class="modal-overlay" id="zone-cycle-modal">
-      <div class="modal" style="width:480px;max-width:95vw">
-        <div class="modal-title">Điều chỉnh chu kỳ - ${escapeHtml(zone.name)}</div>
-        <div class="form-group">
-          <label class="form-label">Tổng số ngày kéo dài</label>
-          <input class="form-input" id="zone-adjustment-days" type="number" min="0" max="365"
-            value="${Number(zone.cycle_adjustment_days) || 0}">
-          <div class="form-helper">Nhập 0 để xóa điều chỉnh và trở về lịch gốc.</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Lý do điều chỉnh</label>
-          <textarea class="form-input" id="zone-adjustment-reason" rows="3">${escapeHtml(zone.adjustment_reason || "")}</textarea>
-        </div>
-        <div class="modal-actions">
-          <button class="btn btn-outline" id="cancel-zone-cycle">Hủy</button>
-          <button class="btn btn-primary" id="save-zone-cycle">Lưu điều chỉnh</button>
-        </div>
-      </div>
-    </div>`;
-  document.body.insertAdjacentHTML("beforeend", modalHtml);
-  const modal = document.getElementById("zone-cycle-modal");
-  openModal("zone-cycle-modal");
-  document.getElementById("cancel-zone-cycle").addEventListener("click", () => {
-    closeModal("zone-cycle-modal");
-    modal.remove();
-  });
-  document.getElementById("save-zone-cycle").addEventListener("click", async () => {
-    const days = Number(document.getElementById("zone-adjustment-days").value);
-    const reason = document.getElementById("zone-adjustment-reason").value.trim();
-    if (!Number.isInteger(days) || days < 0 || days > 365) {
-      showToast("Số ngày điều chỉnh phải từ 0 đến 365", "warning");
-      return;
-    }
-    if (days > 0 && !reason) {
-      showToast("Vui lòng nhập lý do điều chỉnh", "warning");
-      return;
-    }
-    try {
-      await updateZoneCycle(zone.id, days, reason);
-      await loadZones();
-      selectedZone = findNodeById(zones, key);
-      renderZones();
-      closeModal("zone-cycle-modal");
-      modal.remove();
-      showToast("Đã cập nhật chu kỳ của Zone");
-    } catch (err) {
-      showToast("Lỗi điều chỉnh chu kỳ: " + err.message, "error");
-    }
   });
 }
 
@@ -420,7 +267,7 @@ export async function renderZonesPage() {
                 <div class="page-title">Quản lý Vùng trồng</div>
                 <div class="page-sub">Phân vùng quản lý và trực quan hóa cấu trúc nhà kính</div>
             </div>
-            <button class="btn btn-primary" id="add-zone-btn">➕ Thêm khu vực</button>
+            <button class="btn btn-primary" id="add-zone-btn" title="Tạo khu vực mới">🗺️ Tạo khu vực</button>
         </div>
         <div class="zone-search-bar">
             <input type="text" id="zone-search" class="form-input" placeholder="🔍 Tìm kiếm vùng..." style="width: 100%; margin-bottom: 16px;">
@@ -565,7 +412,7 @@ function findParentId(nodes, childKey) {
 
 async function openZoneModal(editKey = null) {
   const zone = editKey ? findNodeById(zones, editKey) : null;
-  const title = zone ? "Sửa vùng" : "Thêm vùng mới";
+  const title = zone ? "✏️ Sửa vùng" : "🗺️ Tạo khu vực mới";
 
   // Lấy danh sách recipe
   const recipeOptions = await getRecipeList();

@@ -83,6 +83,20 @@ async function main() {
       high.controls.some((control) => control.active),
       "AUTO actuator was not enabled"
     );
+    const systemLog = await pool.request().input("maxLogId", sql.Int, maxLogId).query(`
+      SELECT COUNT(*) AS logCount FROM [Log]
+      WHERE log_id > @maxLogId AND triggered_by = 'SYSTEM' AND user_id IS NULL
+    `);
+    assert(systemLog.recordset[0].logCount > 0, "Automatic control did not create a system Log");
+    const activeState = await pool.request().input("zoneId", sql.Int, context.zoneId)
+      .input("marker", sql.NVarChar, marker).query(`
+        SELECT COUNT(*) AS alertCount FROM AlertLog
+        WHERE zone_id = @zoneId AND LEFT(message, LEN(@marker)) = @marker
+          AND status = 'UNSOLVED';
+        SELECT status FROM Zone WHERE zone_id = @zoneId;
+      `);
+    assert.strictEqual(activeState.recordsets[0][0].alertCount, 1, "AlertLog was not created");
+    assert.notStrictEqual(activeState.recordsets[1][0].status, "optimal", "Zone status was not updated");
 
     const normal = await simulator.processReading(
       context.sensorId,
@@ -107,6 +121,20 @@ async function main() {
     assert.strictEqual(Number(databaseState.recordsets[0][0].latestValue), normalValue);
     assert.strictEqual(databaseState.recordsets[1][0].status, "RESOLVED");
     assert(databaseState.recordsets[1][0].resolvedAt, "Alert has no resolved timestamp");
+    const resolvedZone = await pool.request().input("zoneId", sql.Int, context.zoneId).query(`
+      SELECT z.status,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM AlertLog a WHERE a.zone_id = z.zone_id
+            AND a.status <> 'RESOLVED' AND LEFT(a.message, 6) = '[AUTO:'
+            AND a.severity = 'CRITICAL') THEN 'high'
+          WHEN EXISTS (SELECT 1 FROM AlertLog a WHERE a.zone_id = z.zone_id
+            AND a.status <> 'RESOLVED' AND LEFT(a.message, 6) = '[AUTO:'
+            AND a.severity = 'WARNING') THEN 'warning'
+          ELSE 'optimal'
+        END AS expectedStatus
+      FROM Zone z WHERE z.zone_id = @zoneId
+    `);
+    assert.strictEqual(resolvedZone.recordset[0].status, resolvedZone.recordset[0].expectedStatus);
 
     console.log(
       JSON.stringify(

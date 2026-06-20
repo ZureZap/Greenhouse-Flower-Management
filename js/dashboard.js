@@ -177,7 +177,9 @@ function getChartData(greenhouseId) {
     tempData: series("Temperature"),
     humData: series("Humidity"),
     lightData: series("Light"),
-    co2Data: series("CO2")
+    co2Data: series("CO2"),
+    soilData: series("SoilHumidity"),
+    phData: series("PH")
   };
 }
 
@@ -199,7 +201,7 @@ function destroyCharts() {
 
 function initCharts(data, stats) {
   const labels = data.labels;
-  const { tempData, humData, lightData, co2Data } = data;
+  const { tempData, humData, lightData, co2Data, soilData, phData } = data;
 
   // 1. Area chart
   const areaCtx = document.getElementById("areaChart")?.getContext("2d");
@@ -257,25 +259,26 @@ function initCharts(data, stats) {
           (row) =>
             String(row.greenhouseId) === String(currentGreenhouseId) && row.metricType === metric
         )?.value;
-    const lightScore = norm(latest("Light"), 0, 1000);
+    const lightScore = norm(latest("Light"), 0, 30000);
     const co2Score = norm(latest("CO2"), 300, 1200);
     const phScore = norm(latest("PH"), 4, 9);
+    const soilScore = norm(latest("SoilHumidity"), 30, 90);
 
     radarChart = new Chart(radarCtx, {
       type: "radar",
       data: {
-        labels: ["Nhiệt độ", "Độ ẩm", "Ánh sáng", "CO2", "pH đất"],
+        labels: ["Nhiệt độ", "Độ ẩm không khí", "Ánh sáng", "CO2", "pH", "Độ ẩm đất"],
         datasets: [
           {
             label: "Thực tế",
-            data: [tempScore, humScore, lightScore, co2Score, phScore],
+            data: [tempScore, humScore, lightScore, co2Score, phScore, soilScore],
             borderColor: "#10b981",
             backgroundColor: "rgba(16,185,129,0.4)",
             pointBackgroundColor: "#10b981"
           },
           {
             label: "Tối ưu",
-            data: [85, 80, 75, 80, 85],
+            data: [85, 80, 75, 80, 85, 80],
             borderColor: "#3b82f6",
             backgroundColor: "rgba(59,130,246,0.2)",
             pointBackgroundColor: "#3b82f6"
@@ -313,6 +316,22 @@ function initCharts(data, stats) {
             tension: 0.4,
             pointRadius: 0,
             yAxisID: "y1"
+          },
+          {
+            label: "Độ ẩm đất (%)",
+            data: soilData,
+            borderColor: "#3b82f6",
+            tension: 0.4,
+            pointRadius: 0,
+            yAxisID: "y2"
+          },
+          {
+            label: "pH",
+            data: phData,
+            borderColor: "#8b5cf6",
+            tension: 0.4,
+            pointRadius: 0,
+            yAxisID: "y3"
           }
         ]
       },
@@ -329,6 +348,18 @@ function initCharts(data, stats) {
             position: "right",
             title: { display: true, text: "CO2 (ppm)" },
             grid: { drawOnChartArea: false }
+          },
+          y2: {
+            position: "left",
+            min: 0,
+            max: 100,
+            display: false
+          },
+          y3: {
+            position: "right",
+            min: 0,
+            max: 14,
+            display: false
           }
         }
       }

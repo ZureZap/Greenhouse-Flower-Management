@@ -10,7 +10,7 @@ const METRIC_DEFAULTS = {
   Temperature: { base: 25, drift: 0.8, min: 10, max: 45 },
   Humidity: { base: 75, drift: 3, min: 0, max: 100 },
   SoilHumidity: { base: 68, drift: 3, min: 0, max: 100 },
-  Light: { base: 550, drift: 80, min: 0, max: 2000 },
+  Light: { base: 14000, drift: 800, min: 0, max: 50000 },
   CO2: { base: 700, drift: 70, min: 200, max: 2000 },
   PH: { base: 6.3, drift: 0.2, min: 0, max: 14 }
 };
@@ -92,6 +92,7 @@ class BackendSimulator {
     this.tickInProgress = true;
     try {
       const pool = await this.getConnection();
+      await this.resetExpiredManualControls(pool);
       const sensors = await pool.request().query(`
                 SELECT device_id AS deviceId
                 FROM Device
@@ -110,6 +111,23 @@ class BackendSimulator {
     } finally {
       this.tickInProgress = false;
     }
+  }
+
+  async resetExpiredManualControls(pool) {
+    await pool.request().query(`
+      DECLARE @ResetDevices TABLE (device_id INT);
+      UPDATE ControlProperties
+      SET mode = 'AUTO', auto_reset_time = NULL
+      OUTPUT INSERTED.device_id INTO @ResetDevices(device_id)
+      WHERE mode = 'MANUAL' AND auto_reset_time IS NOT NULL
+        AND auto_reset_time <= GETDATE();
+
+      INSERT INTO [Log] (device_id, user_id, action, triggered_by, log_time)
+      SELECT device_id, NULL,
+        N'Tự động chuyển thiết bị về chế độ AUTO sau khi hết thời gian điều khiển thủ công.',
+        'SYSTEM', GETDATE()
+      FROM @ResetDevices;
+    `);
   }
 
   async processReading(deviceId, suppliedValue = null, timestamp = null, source = "MANUAL_TEST") {
@@ -136,8 +154,10 @@ class BackendSimulator {
                     WHERE gs.recipe_id = z.recipe_id AND th.metric_type = d.metric_type
                     ORDER BY CASE
                         WHEN z.start_date IS NOT NULL
-                         AND DATEDIFF(DAY, z.start_date, GETDATE()) + 1 BETWEEN gs.start_day AND gs.end_day THEN 0
-                        WHEN gs.completed = 0 THEN 1 ELSE 2 END,
+                         AND DATEDIFF(DAY, z.start_date, GETDATE()) + 1
+                             - ISNULL(z.cycle_adjustment_days, 0)
+                             BETWEEN gs.start_day AND gs.end_day THEN 0
+                        ELSE 1 END,
                         gs.start_day
                 ) threshold
                 WHERE d.device_id = @deviceId AND d.device_type = 'SENSOR'
@@ -359,8 +379,10 @@ class BackendSimulator {
                 WHERE gs.recipe_id = z.recipe_id AND th.metric_type = d.metric_type
                 ORDER BY CASE
                     WHEN z.start_date IS NOT NULL
-                     AND DATEDIFF(DAY, z.start_date, GETDATE()) + 1 BETWEEN gs.start_day AND gs.end_day THEN 0
-                    WHEN gs.completed = 0 THEN 1 ELSE 2 END,
+                     AND DATEDIFF(DAY, z.start_date, GETDATE()) + 1
+                         - ISNULL(z.cycle_adjustment_days, 0)
+                         BETWEEN gs.start_day AND gs.end_day THEN 0
+                    ELSE 1 END,
                     gs.start_day
             ) threshold
             WHERE d.zone_id = @zoneId AND d.device_type = 'SENSOR'

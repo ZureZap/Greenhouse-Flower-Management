@@ -270,7 +270,10 @@ INSERT INTO Device (device_id, gateway_id, zone_id, device_name, device_type, me
 (10, 2, 3, N'Cảm biến CO2 Lan B1', 'SENSOR', 'CO2', '02:00:00:00:00:0A', 9, 'NEEDS_REPLACEMENT', DATEADD(MINUTE, -3, GETDATE())),
 (11, 2, 3, N'Quạt làm mát Lan B1', 'OUTPUT_DEVICE', 'Cooling', '02:00:00:00:00:0B', NULL, 'ONLINE', DATEADD(SECOND, -14, GETDATE())),
 (12, 3, 4, N'Cảm biến nhiệt độ thử nghiệm', 'SENSOR', 'Temperature', '02:00:00:00:00:0C', 100, 'ONLINE', GETDATE()),
-(13, 3, 4, N'Cảm biến pH thử nghiệm', 'SENSOR', 'PH', '02:00:00:00:00:0D', 72, 'ONLINE', DATEADD(SECOND, -35, GETDATE()));
+(13, 3, 4, N'Cảm biến pH thử nghiệm', 'SENSOR', 'PH', '02:00:00:00:00:0D', 72, 'ONLINE', DATEADD(SECOND, -35, GETDATE())),
+(14, 1, 1, N'Cảm biến ánh sáng Hồng A1', 'SENSOR', 'Light', '02:00:00:00:00:0E', 79, 'ONLINE', DATEADD(SECOND, -22, GETDATE())),
+(15, 1, 1, N'Cảm biến pH Hồng A1', 'SENSOR', 'PH', '02:00:00:00:00:0F', 84, 'ONLINE', DATEADD(SECOND, -24, GETDATE())),
+(16, 1, 1, N'Cảm biến CO2 Hồng A1', 'SENSOR', 'CO2', '02:00:00:00:00:10', 86, 'ONLINE', DATEADD(SECOND, -18, GETDATE()));
 SET IDENTITY_INSERT Device OFF;
 GO
 
@@ -299,22 +302,14 @@ GO
 -- 10. Threshold (cho từng stage)
 SET IDENTITY_INSERT Threshold ON;
 INSERT INTO Threshold (threshold_id, stage_id, metric_type, min_value, max_value) VALUES
-(1, 1, 'Temperature', 22, 26),
-(2, 1, 'SoilHumidity', 65, 80),
-(3, 2, 'Temperature', 23, 28),
-(4, 2, 'SoilHumidity', 60, 75),
-(5, 3, 'Temperature', 20, 26),
-(6, 3, 'SoilHumidity', 55, 70),
-(7, 4, 'Temperature', 22, 26),
-(8, 4, 'Humidity', 75, 90),
-(9, 5, 'Temperature', 23, 27),
-(10, 5, 'Humidity', 70, 88),
-(11, 6, 'Temperature', 21, 25),
-(12, 6, 'Humidity', 70, 85),
-(13, 7, 'Temperature', 20, 27),
-(14, 7, 'SoilHumidity', 55, 75),
-(15, 8, 'Temperature', 21, 28),
-(16, 8, 'SoilHumidity', 50, 70);
+(1,1,'Temperature',22,26),(2,1,'Humidity',65,80),(3,1,'Light',8000,18000),(4,1,'SoilHumidity',65,80),(5,1,'PH',5.8,6.8),(6,1,'CO2',500,900),
+(7,2,'Temperature',23,28),(8,2,'Humidity',60,75),(9,2,'Light',12000,25000),(10,2,'SoilHumidity',60,75),(11,2,'PH',5.8,6.8),(12,2,'CO2',600,1000),
+(13,3,'Temperature',20,26),(14,3,'Humidity',55,70),(15,3,'Light',15000,30000),(16,3,'SoilHumidity',55,70),(17,3,'PH',5.8,6.8),(18,3,'CO2',600,1100),
+(19,4,'Temperature',22,26),(20,4,'Humidity',75,90),(21,4,'Light',6000,14000),(22,4,'SoilHumidity',70,85),(23,4,'PH',5.5,6.5),(24,4,'CO2',500,900),
+(25,5,'Temperature',23,27),(26,5,'Humidity',70,88),(27,5,'Light',8000,18000),(28,5,'SoilHumidity',65,80),(29,5,'PH',5.5,6.5),(30,5,'CO2',550,950),
+(31,6,'Temperature',21,25),(32,6,'Humidity',70,85),(33,6,'Light',10000,22000),(34,6,'SoilHumidity',60,75),(35,6,'PH',5.5,6.5),(36,6,'CO2',600,1000),
+(37,7,'Temperature',20,27),(38,7,'Humidity',60,80),(39,7,'Light',7000,16000),(40,7,'SoilHumidity',55,75),(41,7,'PH',5.8,6.8),(42,7,'CO2',500,900),
+(43,8,'Temperature',21,28),(44,8,'Humidity',55,75),(45,8,'Light',10000,24000),(46,8,'SoilHumidity',50,70),(47,8,'PH',5.8,6.8),(48,8,'CO2',600,1000);
 SET IDENTITY_INSERT Threshold OFF;
 GO
 
@@ -342,8 +337,15 @@ INSERT INTO SensorData (device_id, [timestamp], raw_value) VALUES
 (10, DATEADD(MINUTE, -10, GETDATE()), 950.00),
 (13, DATEADD(MINUTE, -20, GETDATE()), 6.10),
 (13, DATEADD(MINUTE, -10, GETDATE()), 6.30),
-(14, DATEADD(MINUTE, -20, GETDATE()), 1.80),
-(14, DATEADD(MINUTE, -10, GETDATE()), 1.95);
+(14, DATEADD(MINUTE, -20, GETDATE()), 12500.00),
+(14, DATEADD(MINUTE, -10, GETDATE()), 13800.00),
+(14, GETDATE(), 14200.00),
+(15, DATEADD(MINUTE, -20, GETDATE()), 6.10),
+(15, DATEADD(MINUTE, -10, GETDATE()), 6.20),
+(15, GETDATE(), 6.30),
+(16, DATEADD(MINUTE, -20, GETDATE()), 680.00),
+(16, DATEADD(MINUTE, -10, GETDATE()), 720.00),
+(16, GETDATE(), 760.00);
 GO
 
 -- 12. AlertLog: du muc do va trang thai xu ly

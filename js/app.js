@@ -41,6 +41,16 @@ export function closeModal(id) {
 // ===================== ĐIỀU HƯỚNG =====================
 
 let isAuth = false;
+const ROLE_PAGES = {
+  OWNER: ["dashboard", "devices", "zones", "growth", "control", "alerts", "logs", "user-approval"],
+  TECHNICIAN: ["dashboard", "devices", "growth", "control"],
+  OPERATOR: ["dashboard", "control"]
+};
+
+function canAccessPage(pageName) {
+  const role = getCurrentUser()?.role;
+  return Boolean(role && ROLE_PAGES[role]?.includes(pageName));
+}
 
 function renderPage(pageName) {
   const pageMap = {
@@ -73,7 +83,8 @@ function handleRoute() {
     window.location.hash = "dashboard";
     return;
   }
-  if (isAuth && hash === "user-approval" && getCurrentUser()?.role !== "OWNER") {
+  if (isAuth && !isPublic && !canAccessPage(hash)) {
+    showToast("Bạn không có quyền truy cập chức năng này", "warning");
     window.location.hash = "dashboard";
     return;
   }
@@ -195,6 +206,9 @@ function toggleSidebar() {
     sidebar.style.display = "flex";
     addLogoutButton();
     addChangePasswordMenu();
+    document.querySelectorAll(".sidebar-nav .nav-item[data-page]").forEach((item) => {
+      item.style.display = canAccessPage(item.dataset.page) ? "flex" : "none";
+    });
     const ownerItem = document.getElementById("owner-approval-item");
     if (getCurrentUser()?.role !== "OWNER") ownerItem?.remove();
     addOwnerMenu();
@@ -203,6 +217,9 @@ function toggleSidebar() {
     document.getElementById("owner-approval-item")?.remove();
     document.getElementById("change-password-item")?.remove();
     document.getElementById("logout-item")?.remove();
+    document.querySelectorAll(".sidebar-nav .nav-item[data-page]").forEach((item) => {
+      item.style.display = "none";
+    });
   }
 }
 
